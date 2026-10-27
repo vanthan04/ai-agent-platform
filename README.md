@@ -12,6 +12,7 @@ backend/         API, worker and AI agent runtime in one codebase
   src/shared-kernel/  ids, roles, branch rules shared by every context
   src/projects/       project aggregate, use cases, storage, HTTP   (domain / application / infrastructure / interface)
   src/execution/      tasks and runs: state machine, approval rules, storage, HTTP
+  src/worker/         the process that prepares queued runs (pnpm worker)
   src/integrations/   provider descriptors, input snapshots, repository resolution
   src/policy/         allow / ask / deny decisions for agent actions
   src/identity/       who is calling (dev user only for now)
@@ -21,7 +22,7 @@ backend/         API, worker and AI agent runtime in one codebase
 docs/            implementation plan and decisions
 ```
 
-`backend/src/` is organised by bounded context (D19) and grows by context as phases land (`mcp`, `worker`, `agent`, …). Dependencies point inwards and only along the allowed list; `pnpm lint` enforces them. The AI runtime is a context of the backend, not a separate service, unless decision O4 chooses otherwise.
+`backend/src/` is organised by bounded context (D19) and grows by context as phases land (`agent`, …). Dependencies point inwards and only along the allowed list; `pnpm lint` enforces them. The AI runtime is a context of the backend, not a separate service, unless decision O4 chooses otherwise.
 
 ## Commands
 

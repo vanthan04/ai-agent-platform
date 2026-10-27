@@ -14,6 +14,7 @@ src/
   identity/        domain/  application/  infrastructure/  interface/
   vault/           domain/  application/  infrastructure/    encrypted secret storage (SecretStore)
   mcp/             domain/  application/  infrastructure/  interface/   MCP servers connected to a project
+  worker/          application/  infrastructure/            the process that prepares queued runs; worker-main.ts starts it
   database/        the one Prisma client shared by every context
   network/         safe outbound HTTPS: public addresses only, no redirects, limits (D21)
   config/          environment, read once at start
@@ -29,21 +30,21 @@ prisma/            schema and migrations
 | `infrastructure` | Prisma repository, system clock | domain, application |
 | `interface` | controllers, request schemas, mapping of domain errors to responses | domain, application |
 
-Between contexts: `policy` and `identity` use the kernel; `execution` uses the kernel, `policy`, `identity` and `projects`; `projects` uses the kernel, `identity` and `policy`; `vault` uses the kernel; `mcp` uses the kernel, `identity`, `projects` and `vault`; the kernel uses nothing. A context is imported only through its `index.ts`. `pnpm lint` fails on a violation (`eslint.config.mjs`). A layer folder is created when a context needs it, not before.
+Between contexts: `policy` and `identity` use the kernel; `execution` uses the kernel, `policy`, `identity` and `projects`; `projects` uses the kernel, `identity` and `policy`; `vault` uses the kernel; `mcp` uses the kernel, `identity`, `projects` and `vault`; `worker` uses the kernel, `execution` and `integrations`; the kernel uses nothing. A context is imported only through its `index.ts`. `pnpm lint` fails on a violation (`eslint.config.mjs`). A layer folder is created when a context needs it, not before.
 
 ## Contexts
 
 | Context | Status | Owns |
 |---|---|---|
 | `shared-kernel` | done | ids (including `ProjectId`, `IdempotencyKey`, `CorrelationId`), `Role`, protected-branch matching, `BranchName` and `BranchPattern`, `RepoRef`, `DomainError`. |
-| `projects` | phase 2, fourth slice | also stores each project's editable policy as append-only versions (D10, D20): `createPolicyVersion()` refuses a stale `expectedVersion` and a no-op; members read, a PM or PL saves. Earlier slices: | the `Project` aggregate: creator starts as PL, only PM or PL change it (D10), a user is a member once, a project keeps at least one PL (D12, D19); connected repositories with the branches a run may start from (D7): an address is https or ssh and never carries credentials, a repository is connected once per provider, the default branch must be an allowed one, no pattern may match every branch, at most 20 repositories. `isBranchAllowed()` is ready for repository resolution (phase 4). Use cases, Postgres storage, HTTP. |
-| `execution` | phase 2, first slice | task, run, step, tool call, event, artifact, approval; run state machine including `blocked` (D14); `canApprovePublish`. Tasks (always against a connected repository and an allowed base branch) and runs are stored and served: queue a run with an idempotency key, one run in progress per task, cancel with compare-and-set, append-only numbered events to resume from (D22). Not yet: the worker that moves a queued run forward. |
+| `projects` | phase 2, fourth slice | the `Project` aggregate: creator starts as PL, only PM or PL change it (D10), a user is a member once, a project keeps at least one PL (D12, D19); connected repositories with the branches a run may start from (D7): an address is https or ssh and never carries credentials, a repository is connected once per provider, the default branch must be an allowed one, no pattern may match every branch, at most 20 repositories. `isBranchAllowed()` is ready for repository resolution (phase 4). The project's editable policy is stored as append-only versions (D10, D20): `createPolicyVersion()` refuses a stale `expectedVersion` and a no-op; members read, a PM or PL saves. Use cases, Postgres storage, HTTP. |
+| `execution` | phase 2, first slice | task, run, step, tool call, event, artifact, approval; run state machine including `blocked` (D14); `canApprovePublish`. Tasks (always against a connected repository and an allowed base branch) and runs are stored and served: queue a run with an idempotency key, one run in progress per task, cancel with compare-and-set, append-only numbered events to resume from (D22). A queued run is picked up by the worker, which records the commit its base branch points at (`baseCommit` on a single run, D23). |
 | `integrations` | phase 1 done | `ProviderDescriptor` with a declarative config schema, `InputSnapshot`, `RepositoryResolution`. |
 | `policy` | phase 2 | `evaluate()` and `PolicyDecision`; the fixed baseline (`baseline.ts`); `EditablePolicy`, the only part a project may change, and `buildPolicyContext()` that merges it with the baseline into the input of `evaluate()` (D8, D20). An MCP tool call still needs a new action kind (D9). |
 | `identity` | dev only | `Authenticator` seam, global guard (every route needs a user unless `@Public()`), `@CurrentUser()`, the fixed dev user (D18). |
 | `vault` | phase 2 | the secrets layer: `SecretStore` port, AES-256-GCM in Postgres with the key from `SECRETS_ENCRYPTION_KEY` (D21). Returns a `SecretRef`; no API reveals a secret. |
 | `mcp` | phase 2 | `McpConnection` per project: fixed name, https address of a public server, optional bearer token kept in the vault (D9, D11, D21). Testing a connection lists the server's tools through `network/`. Not yet: calling a tool during a run (phase 6), storing the discovered tools. The per-tool `allow`/`ask` setting is in the project policy (`mcpToolDecisions`, D20). |
-| `worker` | planned, phases 4 to 7 | runs through `transition()`, sandbox, publish after a persisted PM or PL approval (D3). |
+| `worker` | phase 3, first slice | its own process (`pnpm worker`): takes queued runs by compare-and-set, moves them to `preparing`, reads the commit of the base branch over https through `network/`, stores it, writes events, blocks a run that cannot be read and fails one whose worker stopped (D23). Today a prepared run ends `failed` with "stages after preparing are not implemented". Next: analysis, then the sandbox, then publish after a persisted PM or PL approval (D3). |
 | `agent` | planned, phase 6 | the AI runtime; every tool call goes through `policy.evaluate()`. |
 
 ## API
@@ -75,7 +76,7 @@ Between contexts: `policy` and `identity` use the kernel; `execution` uses the k
 | `GET /projects/:id/tasks` and `GET /projects/:id/tasks/:taskId` | member | newest first (`?limit`, up to 100); 404 unknown |
 | `POST /projects/:id/tasks/:taskId/runs` | member | header `Idempotency-Key` required, `X-Correlation-Id` optional. 201 a queued run; 200 the same run for a repeated key; 409 the task already has a run in progress or the key belongs to another task |
 | `GET /projects/:id/runs` | member | newest first; `?taskId`, `?status`, `?limit` |
-| `GET /projects/:id/runs/:runId` and `GET /projects/:id/runs/:runId/events?after=N&limit=` | member | the run; its events after sequence number N, in order |
+| `GET /projects/:id/runs/:runId` and `GET /projects/:id/runs/:runId/events?after=N&limit=` | member | the run (with `baseCommit` once the worker has prepared it); its events after sequence number N, in order |
 | `POST /projects/:id/runs/:runId/cancel` | PM, PL or who started it | 200 the cancelled run; 403 another DEV; 409 already ended, publishing, or changed meanwhile |
 
 Members are named by `userId` as the authenticator reports it; there is no users table yet.
@@ -110,6 +111,8 @@ Members are named by `userId` as the authenticator reports it; there is no users
    ```
 
 3. Run the app: `pnpm start`. Without `DATABASE_URL`, `/health` works and the project routes answer 500.
+
+4. Run the worker in a second terminal: `pnpm worker`. Without it a run stays `queued`. It reads public https repositories only, needs network access, and shuts down cleanly on Ctrl+C.
 
 If port 3001 is already used by another program, set `PORT` in `.env`.
 

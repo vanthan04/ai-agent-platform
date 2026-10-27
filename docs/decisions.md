@@ -22,7 +22,7 @@ pnpm workspace (`frontend`, `backend`), strict TypeScript, Vitest, ESLint with t
 - The policy evaluator returns `allow`, `ask` or `deny`. `ask` means a persisted approval is required first. Unlike the harness, a secret file read is `deny`, not `ask`, because there is no human present mid-run.
 
 ## D6 Two source folders and the remote
-The code is split into two source folders: `frontend/` (Next.js UI) and `backend/` (API, worker and AI agent runtime in one codebase). The AI runtime is a backend module, not a third folder, unless O4 later chooses a separate service. Inside `backend/src/`, `domain` depends on nothing, `policy` depends only on `domain`, and later modules (`api`, `worker`, `agent`, `integrations`) may depend on both. A module folder is created only when its phase starts. `frontend/` exists so far only as a README; no frontend framework is installed yet. The backend stack is D17; the queue is still O6.
+The code is split into two source folders: `frontend/` (Next.js UI) and `backend/` (API, worker and AI agent runtime in one codebase). The AI runtime is a backend module, not a third folder, unless O4 later chooses a separate service. Inside `backend/src/`, `domain` depends on nothing, `policy` depends only on `domain`, and later modules (`api`, `worker`, `agent`, `integrations`) may depend on both. A module folder is created only when its phase starts. `frontend/` exists so far only as a README; no frontend framework is installed yet. The backend stack is D17; the queue is the run table (D23).
 
 The git remote `origin` is `https://github.com/vanthan04/ai-agent-platform.git`. `harness-engineering/` is git-ignored (D16). The earlier inner repository of `platform/agent-platform` had no commits and was merged into the outer one.
 
@@ -80,12 +80,13 @@ Decided 2026-10-27. `backend/src/` is split into bounded contexts, one folder ea
 - `identity`: who is calling (`Authenticator` seam, guard, dev user).
 - `vault`: the secrets layer (encrypted storage behind a `SecretStore` port). Named `vault` because paths named `secrets` are protected from the AI coding agent.
 - `mcp`: the MCP servers connected to a project, and testing them.
+- `worker`: the background process that takes queued runs and prepares them (D23); uses `execution` and `integrations`.
 - `network` (like `config` and `database`, shared infrastructure, not a context): the only way the server calls a URL a user supplied (D21).
 - `config` (environment) and `app` (the composition root, health) sit beside the contexts.
 
 A context that has more than pure rules is split into `domain` (entities, value objects, domain errors, repository interfaces; no framework, no I/O), `application` (use cases and ports), `infrastructure` (Prisma, clock) and `interface` (controllers, request schemas, error mapping). Rules, enforced by ESLint in `backend/eslint.config.mjs` so `pnpm lint` fails on a violation:
 - dependencies point inwards: `domain` imports no other layer, no Nest, no Prisma, no `node:`; `application` imports neither `infrastructure` nor `interface`;
-- contexts depend only along the allowed list (`policy` and `identity` on the kernel; `execution` on the kernel, `policy`, `identity` and `projects`; `projects` on the kernel, `identity` and `policy`; `vault` on the kernel; `mcp` on the kernel, `identity`, `projects` and `vault`; the kernel on nothing) and only through the other context's `index.ts`;
+- contexts depend only along the allowed list (`policy` and `identity` on the kernel; `execution` on the kernel, `policy`, `identity`, `projects` and `integrations`; `worker` on the kernel, `execution` and `integrations`; `projects` on the kernel, `identity` and `policy`; `vault` on the kernel; `mcp` on the kernel, `identity`, `projects` and `vault`; the kernel on nothing) and only through the other context's `index.ts`;
 - no context imports `app`.
 A broken business rule is a `DomainError` with a `code`; the interface layer of its context turns the code into a response. A layer folder is created only when the context needs it.
 
@@ -120,7 +121,18 @@ Decided 2026-10-27, within D13 to D15.
 - **One run in progress per task**, enforced by a partial unique index in the database as well as in the use case (409). A task whose run ended (cancelled, failed, blocked, rejected, succeeded) can be run again; the new run is the next attempt and the earlier one, with its events, stays untouched (D14).
 - **State changes** go through `transition()` only, and are written with compare-and-set: the row changes only if it is still in the state the caller saw, otherwise 409 `run_state_conflict`, so two people acting at once cannot both win. A run in `publishing` cannot be cancelled. The stored state is read back through the schema, so a row with an unknown state is refused.
 - **Events** are append only and numbered 1, 2, 3 … per run; the first is written with the run, the next in the same transaction as each state change. `GET …/events?after=N` returns what came after N, so a client that lost its connection resumes where it stopped. Polling first; a stream later.
-- Not built yet: the worker that takes a queued run (preparing, analysing and so on), retries by the system, the audit of who read what, usage records, the Jira source fetch, and recording the policy version on a run.
+- Not built yet: the stages after preparing (D23), retries by the system, the audit of who read what, usage records, the Jira source fetch, and recording the policy version on a run.
+
+## D23 The worker and the queue (first worker slice; settles O6)
+Decided 2026-10-27.
+- **The queue is the `Run` table.** A run in `queued` is waiting; a worker takes it by moving it to `preparing` with the same compare-and-set as every other state change, so any number of workers can run and exactly one wins each run. No new infrastructure. Events are polled (`GET …/events?after=N`); a stream can be added later without changing the queue.
+- **The worker is its own process**, `pnpm worker` (`src/worker-main.ts`, no HTTP server), in the `worker` context. It asks the execution context for the queue, the stores and the state machine and never reads their tables. A pass recovers stalled runs, then prepares up to 5 queued ones, oldest first; with nothing to do it waits 2 s. On a stop signal it finishes the pass it is in.
+- **What it does today, "preparing":** moves the run to `preparing`; reads the commit the task's base branch points at; stores it (`RunResolution`, once, with source `user_selected` because a person picked the repository); writes each step as an event. The commit is read from the git "smart HTTP" ref advertisement every https git server gives (`info/refs?service=git-upload-pack`), through the safe client of D21: public addresses only, no redirects, 20 s, 8 MB. No credential is sent, so only repositories readable without signing in work; ssh addresses are not supported yet.
+- **Outcomes.** Branch or repository not found (a private repository looks the same as a missing one) or an ssh address: `blocked`, with a reason a person can act on (D14). The host unreachable, too slow, too large, a forbidden address or not a git server: `failed`, one plain reason. A run in `preparing` with no new event for 5 minutes is taken to have lost its worker and is failed so the task can run again. A cancel during preparing wins: the worker's next change is refused and it leaves the run alone.
+- **No stage exists after preparing.** A prepared run therefore ends `failed` with the reason that analysis, planning and implementation are not implemented, instead of waiting for a stage nobody runs. The next slice replaces that last step with the move to `analyzing`.
+- **Nothing a remote server says, and no exception text, is stored or logged**: failures are one fixed sentence in the run, and the worker log names the kind of error and the run and correlation ids only.
+- `baseBranch` of a task must now be a concrete branch name (`BranchName`); a pattern such as `release/*` is refused. The `RunView` of a single run carries `baseCommit`.
+- Not built yet: private repositories (a credential per project, kept in the vault), ssh and CodeCommit, system retries, a heartbeat longer than the 5-minute rule, and the stages after preparing.
 
 ## Boundary
 `harness-engineering` guides the AI coding agents that build this product. It is not a runtime and is not shipped. Product runtime (UI, API, queue, workers, provider adapters, integrations, approvals) lives only here. Do not copy harness rules into this repo; reference them.
@@ -157,10 +169,9 @@ Recorded from the Phase 0 audit. Facts are checked against the domain and policy
 - **Policy package.** It restates harness git and secret rules in code (`GIT_BLOCKED`, `isSecretPath`). The boundary says to reference harness rules, not copy them, so the two can drift. Before Phase 5, review three points: whether an allowed executable such as `node` or `pnpm` is allowed whatever its arguments, whether `git fetch` should count as touching the remote, and whether git's `-c` option can inject configuration. These are unverified suspicions, not confirmed defects.
 
 ## Open decisions
-Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D22 onward) in a reviewed change.
+Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D24 onward) in a reviewed change.
 
 - **O4 AI runtime language.** TypeScript as a backend module (the current layout, two source folders) or a separate Python service, which would add a third folder (`ai/`). Proposal: stay with the module; decide at Phase 6 with a minimal agent loop, nothing before it needs Python.
-- **O6 Queue and event transport.** Unchosen. Decide before Phase 4 from the real hosting environment; polling first, server-sent events later.
 - **O7 Tenant and workspace.** Proposal: keep `tenantId` (D2) and treat a workspace as a later grouping under it only if a use case appears.
 - **O8 Where the plan documents live.** Resolved by the layout: in `docs/` of this repository, next to this file.## Actions for a human
 Items 1 and 2 touch harness files that only a human may edit.
