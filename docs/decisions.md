@@ -74,7 +74,7 @@ Decided 2026-10-27. Callers are identified by an `Authenticator` interface. Only
 Decided 2026-10-27. `backend/src/` is split into bounded contexts, one folder each, with a shared kernel:
 - `shared-kernel`: ids, `Role`, branch matching, `RepoRef`, `DomainError`. The only thing every context may use.
 - `projects`: the `Project` aggregate (members, roles, invariants), its use cases, storage and HTTP. Has all four layers.
-- `execution`: tasks, runs and their state machine, steps, events, artifacts, approval rules. Domain only for now.
+- `execution`: tasks, runs and their state machine, steps, events, artifacts, approval rules; tasks and runs are stored and served (D22). The executor that moves a run forward is not built yet.
 - `integrations`: provider descriptors, input snapshots, repository resolution. Domain only for now.
 - `policy`: allow, ask or deny for an agent action. Domain only for now.
 - `identity`: who is calling (`Authenticator` seam, guard, dev user).
@@ -85,7 +85,7 @@ Decided 2026-10-27. `backend/src/` is split into bounded contexts, one folder ea
 
 A context that has more than pure rules is split into `domain` (entities, value objects, domain errors, repository interfaces; no framework, no I/O), `application` (use cases and ports), `infrastructure` (Prisma, clock) and `interface` (controllers, request schemas, error mapping). Rules, enforced by ESLint in `backend/eslint.config.mjs` so `pnpm lint` fails on a violation:
 - dependencies point inwards: `domain` imports no other layer, no Nest, no Prisma, no `node:`; `application` imports neither `infrastructure` nor `interface`;
-- contexts depend only along the allowed list (`policy` and `identity` on the kernel; `execution` on the kernel and `policy`; `projects` on the kernel, `identity` and `policy`; `vault` on the kernel; `mcp` on the kernel, `identity`, `projects` and `vault`; the kernel on nothing) and only through the other context's `index.ts`;
+- contexts depend only along the allowed list (`policy` and `identity` on the kernel; `execution` on the kernel, `policy`, `identity` and `projects`; `projects` on the kernel, `identity` and `policy`; `vault` on the kernel; `mcp` on the kernel, `identity`, `projects` and `vault`; the kernel on nothing) and only through the other context's `index.ts`;
 - no context imports `app`.
 A broken business rule is a `DomainError` with a `code`; the interface layer of its context turns the code into a response. A layer folder is created only when the context needs it.
 
@@ -111,6 +111,16 @@ Decided 2026-10-27; the storage of tokens was chosen by the project owner (encry
 - Every outbound call goes through `network/` (`SafeHttpClient`): https only; the name is resolved by our own lookup, which refuses the connection if any answer is not a public address, and the connection uses that checked address, so DNS rebinding cannot swap it afterwards; an IP address in a URL is checked directly; no redirects are followed, so a token cannot be passed to another host; no cookies, no compression, a 10 s deadline and a 1 MB limit. Verified against a real name that resolves to 127.0.0.1 (answered `blocked_address`).
 - Tool names and descriptions from a server are untrusted: names must match `[A-Za-z0-9_.-]{1,64}` and be unique, descriptions lose control characters and are cut to 300 characters, at most 500 tools over 10 pages. They are for display as plain text; they must not be put in a model prompt as instructions.
 - Not built yet: using a token at run time (calling a tool during a run), storing the discovered tools, and removal of the secrets of a deleted project.
+
+## D22 Tasks and runs (first slice of the execution engine)
+Decided 2026-10-27, within D13 to D15.
+- **Who:** any member of a project creates tasks and starts runs; only a PM or PL, or the person who started a run, cancels it. Non-members get 404 for everything.
+- **A task** is described by a person and always targets a repository the project has connected (`repositoryId`) and a base branch that matches one of that connection's allowed branches. The repository is chosen by the caller, never taken from the text of the task (plan phase 4). The task keeps a copy of the repository's name, address and provider, so changing or removing the connection later does not rewrite what was asked. Outputs default to `report`; `pull_request` marks the run as publishing, which still needs the approval of D3 and D15.
+- **A run** is queued and the call returns at once; nothing runs inside the HTTP request. `POST …/tasks/:taskId/runs` needs an `Idempotency-Key` header: the same key in the same project always answers with the same run (200, `created: false` in effect) and never starts a second; the key of another task is refused (409). An optional `X-Correlation-Id` (8 to 64 safe characters) is kept, otherwise one is made; it is stored with the run to join logs.
+- **One run in progress per task**, enforced by a partial unique index in the database as well as in the use case (409). A task whose run ended (cancelled, failed, blocked, rejected, succeeded) can be run again; the new run is the next attempt and the earlier one, with its events, stays untouched (D14).
+- **State changes** go through `transition()` only, and are written with compare-and-set: the row changes only if it is still in the state the caller saw, otherwise 409 `run_state_conflict`, so two people acting at once cannot both win. A run in `publishing` cannot be cancelled. The stored state is read back through the schema, so a row with an unknown state is refused.
+- **Events** are append only and numbered 1, 2, 3 … per run; the first is written with the run, the next in the same transaction as each state change. `GET …/events?after=N` returns what came after N, so a client that lost its connection resumes where it stopped. Polling first; a stream later.
+- Not built yet: the worker that takes a queued run (preparing, analysing and so on), retries by the system, the audit of who read what, usage records, the Jira source fetch, and recording the policy version on a run.
 
 ## Boundary
 `harness-engineering` guides the AI coding agents that build this product. It is not a runtime and is not shipped. Product runtime (UI, API, queue, workers, provider adapters, integrations, approvals) lives only here. Do not copy harness rules into this repo; reference them.

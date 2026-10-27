@@ -8,7 +8,7 @@ API, worker and AI agent runtime in one TypeScript codebase: NestJS 12, Prisma 7
 src/
   shared-kernel/   ids, Role, branch matching, RepoRef, DomainError
   projects/        domain/  application/  infrastructure/  interface/   + projects.module.ts, index.ts
-  execution/       domain/                                     tasks, runs, state machine, approvals
+  execution/       domain/  application/  infrastructure/  interface/   tasks, runs, state machine, approvals
   integrations/    domain/                                     provider descriptors, snapshots, repository resolution
   policy/          domain/                                     allow / ask / deny for agent actions
   identity/        domain/  application/  infrastructure/  interface/
@@ -29,7 +29,7 @@ prisma/            schema and migrations
 | `infrastructure` | Prisma repository, system clock | domain, application |
 | `interface` | controllers, request schemas, mapping of domain errors to responses | domain, application |
 
-Between contexts: `policy` and `identity` use the kernel; `execution` uses the kernel and `policy`; `projects` uses the kernel, `identity` and `policy`; `vault` uses the kernel; `mcp` uses the kernel, `identity`, `projects` and `vault`; the kernel uses nothing. A context is imported only through its `index.ts`. `pnpm lint` fails on a violation (`eslint.config.mjs`). A layer folder is created when a context needs it, not before.
+Between contexts: `policy` and `identity` use the kernel; `execution` uses the kernel, `policy`, `identity` and `projects`; `projects` uses the kernel, `identity` and `policy`; `vault` uses the kernel; `mcp` uses the kernel, `identity`, `projects` and `vault`; the kernel uses nothing. A context is imported only through its `index.ts`. `pnpm lint` fails on a violation (`eslint.config.mjs`). A layer folder is created when a context needs it, not before.
 
 ## Contexts
 
@@ -37,7 +37,7 @@ Between contexts: `policy` and `identity` use the kernel; `execution` uses the k
 |---|---|---|
 | `shared-kernel` | done | ids (including `ProjectId`, `IdempotencyKey`, `CorrelationId`), `Role`, protected-branch matching, `BranchName` and `BranchPattern`, `RepoRef`, `DomainError`. |
 | `projects` | phase 2, fourth slice | also stores each project's editable policy as append-only versions (D10, D20): `createPolicyVersion()` refuses a stale `expectedVersion` and a no-op; members read, a PM or PL saves. Earlier slices: | the `Project` aggregate: creator starts as PL, only PM or PL change it (D10), a user is a member once, a project keeps at least one PL (D12, D19); connected repositories with the branches a run may start from (D7): an address is https or ssh and never carries credentials, a repository is connected once per provider, the default branch must be an allowed one, no pattern may match every branch, at most 20 repositories. `isBranchAllowed()` is ready for repository resolution (phase 4). Use cases, Postgres storage, HTTP. |
-| `execution` | phase 1 done | task, run, step, tool call, event, artifact, approval; run state machine including `blocked` (D14); `canApprovePublish`. |
+| `execution` | phase 2, first slice | task, run, step, tool call, event, artifact, approval; run state machine including `blocked` (D14); `canApprovePublish`. Tasks (always against a connected repository and an allowed base branch) and runs are stored and served: queue a run with an idempotency key, one run in progress per task, cancel with compare-and-set, append-only numbered events to resume from (D22). Not yet: the worker that moves a queued run forward. |
 | `integrations` | phase 1 done | `ProviderDescriptor` with a declarative config schema, `InputSnapshot`, `RepositoryResolution`. |
 | `policy` | phase 2 | `evaluate()` and `PolicyDecision`; the fixed baseline (`baseline.ts`); `EditablePolicy`, the only part a project may change, and `buildPolicyContext()` that merges it with the baseline into the input of `evaluate()` (D8, D20). An MCP tool call still needs a new action kind (D9). |
 | `identity` | dev only | `Authenticator` seam, global guard (every route needs a user unless `@Public()`), `@CurrentUser()`, the fixed dev user (D18). |
@@ -71,6 +71,12 @@ Between contexts: `policy` and `identity` use the kernel; `execution` uses the k
 | `PUT /projects/:id/mcp-connections/:connectionId/token` | PM or PL | body `{ bearerToken }`; replaces the stored token; 404 unknown connection |
 | `POST /projects/:id/mcp-connections/:connectionId/test` | PM or PL | connects and lists the tools. 200 `{ ok: true, testedAt, protocolVersion, server, tools: [{ name, description }], skippedTools, truncated }` or `{ ok: false, testedAt, error }` with one word; 403 DEV; 404 unknown; 429 more than 5 tests a minute |
 | `DELETE /projects/:id/mcp-connections/:connectionId` | PM or PL | 204 and the stored token is deleted; 404 unknown |
+| `POST /projects/:id/tasks` | member | body `{ title, description?, source?, repositoryId, baseBranch, inputs?, outputs? }`; 201 task with a copy of the repository; 400 bad body; 422 repository not connected to the project or base branch not allowed |
+| `GET /projects/:id/tasks` and `GET /projects/:id/tasks/:taskId` | member | newest first (`?limit`, up to 100); 404 unknown |
+| `POST /projects/:id/tasks/:taskId/runs` | member | header `Idempotency-Key` required, `X-Correlation-Id` optional. 201 a queued run; 200 the same run for a repeated key; 409 the task already has a run in progress or the key belongs to another task |
+| `GET /projects/:id/runs` | member | newest first; `?taskId`, `?status`, `?limit` |
+| `GET /projects/:id/runs/:runId` and `GET /projects/:id/runs/:runId/events?after=N&limit=` | member | the run; its events after sequence number N, in order |
+| `POST /projects/:id/runs/:runId/cancel` | PM, PL or who started it | 200 the cancelled run; 403 another DEV; 409 already ended, publishing, or changed meanwhile |
 
 Members are named by `userId` as the authenticator reports it; there is no users table yet.
 

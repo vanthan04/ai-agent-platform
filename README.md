@@ -11,7 +11,7 @@ frontend/        user interface (Next.js)                        not created yet
 backend/         API, worker and AI agent runtime in one codebase
   src/shared-kernel/  ids, roles, branch rules shared by every context
   src/projects/       project aggregate, use cases, storage, HTTP   (domain / application / infrastructure / interface)
-  src/execution/      tasks, runs, state machine, approval rules
+  src/execution/      tasks and runs: state machine, approval rules, storage, HTTP
   src/integrations/   provider descriptors, input snapshots, repository resolution
   src/policy/         allow / ask / deny decisions for agent actions
   src/identity/       who is calling (dev user only for now)
