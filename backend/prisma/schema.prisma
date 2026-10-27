@@ -30,9 +30,75 @@ model Project {
   repositories   RepositoryMapping[]
   policies       ProjectPolicyVersion[]
   mcpConnections McpConnection[]
+  tasks          Task[]
+  runs           Run[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
+}
+
+// Work a person described for a project (D7). It keeps a copy of the repository it targeted, so changing or removing the
+// connection later does not rewrite what was asked. There is no foreign key to `RepositoryMapping` for that reason.
+model Task {
+  id                  String             @id
+  projectId           String
+  title               String
+  description         String
+  sourceType          String
+  jiraIssueKey        String?
+  repositoryMappingId String
+  repoProvider        RepositoryProvider
+  repoName            String
+  repoUrl             String
+  baseBranch          String
+  inputs              Json
+  outputs             String[]
+  createdBy           String
+  createdAt           DateTime
+  project             Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs                Run[]
+
+  @@index([projectId, createdAt])
+}
+
+// One attempt at a task. `status` is validated against the state machine in code on every read and write; it is text so a
+// new state needs no migration. A task has at most one run in progress (a partial unique index, see the migration).
+model Run {
+  id             String     @id
+  projectId      String
+  taskId         String
+  attempt        Int
+  status         String
+  publishes      Boolean
+  idempotencyKey String
+  correlationId  String
+  requestedBy    String
+  createdAt      DateTime
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  failureReason  String?
+  blockedReason  String?
+  project        Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task           Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  events         RunEvent[]
+
+  @@unique([projectId, idempotencyKey])
+  @@unique([taskId, attempt])
+  @@index([projectId, status])
+  @@index([projectId, createdAt])
+}
+
+// Append only: the history of a run, numbered 1, 2, 3 … without gaps, so a client can resume after the last number it saw.
+model RunEvent {
+  runId   String
+  seq     Int
+  id      String
+  type    String
+  payload Json
+  at      DateTime
+  run     Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@id([runId, seq])
 }
 
 // Role of a user inside one project only (D12). `userId` is the id the authenticator gives; there is no users table yet.
