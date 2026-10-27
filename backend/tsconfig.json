@@ -9,6 +9,7 @@
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    "experimentalDecorators": true,
     "skipLibCheck": true,
     "noEmit": true
   },

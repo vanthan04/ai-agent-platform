@@ -10,7 +10,8 @@
     "test": "pnpm -r --if-present run test",
     "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "setup:encryption-key": "pnpm --filter @agent-platform/backend run setup:encryption-key"
   },
   "devDependencies": {
     "prettier": "^3.9.10"
