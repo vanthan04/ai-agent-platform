@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProjectRole {
+  PM
+  PL
+  DEV
+}
+
+enum RepositoryProvider {
+  github
+  codecommit
+}
+
+// A project added from the UI (D7). Every row carries the tenant id (D2) and every query filters by it.
+model Project {
+  id             String                 @id @default(uuid())
+  tenantId       String
+  name           String
+  description    String                 @default("")
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  members        ProjectMember[]
+  repositories   RepositoryMapping[]
+  policies       ProjectPolicyVersion[]
+  mcpConnections McpConnection[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+// Role of a user inside one project only (D12). `userId` is the id the authenticator gives; there is no users table yet.
+model ProjectMember {
+  projectId String
+  userId    String
+  role      ProjectRole
+  createdAt DateTime    @default(now())
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
+}
+
+// One saved state of a project's editable policy (D10). Rows are only ever added, so the table is the audit trail.
+// Version 0 (the default policy) is not stored. `policy` is validated again when read.
+model ProjectPolicyVersion {
+  projectId String
+  version   Int
+  policy    Json
+  changedBy String
+  comment   String   @default("")
+  createdAt DateTime
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, version])
+}
+
+// A remote MCP server connected to a project (D9, D11). `secretRef` points at the encrypted token in `Secret`; the token is
+// never stored here. No foreign key to `Secret`: the two belong to different contexts, and removal is done by the use case.
+model McpConnection {
+  id        String   @id
+  projectId String
+  name      String
+  url       String
+  secretRef String?
+  createdBy String
+  createdAt DateTime
+  updatedAt DateTime
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, name])
+  @@index([projectId])
+}
+
+// An encrypted secret (AES-256-GCM). Only ciphertext is stored; the key lives in the environment, never in the database.
+model Secret {
+  id         String   @id
+  tenantId   String
+  iv         Bytes
+  ciphertext Bytes
+  authTag    Bytes
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+}
+
+// A repository connected to a project and the branches a run may start from (D7). Never holds credentials.
+model RepositoryMapping {
+  id              String             @id
+  projectId       String
+  provider        RepositoryProvider
+  name            String
+  url             String
+  defaultBranch   String
+  allowedBranches String[]
+  createdAt       DateTime           @default(now())
+  project         Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, provider, name])
+  @@index([projectId])
+}
