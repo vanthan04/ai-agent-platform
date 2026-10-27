@@ -1,0 +1,28 @@
+# harness-engineering is kept out of this repository until it is decided whether it belongs here.
+/harness-engineering/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Dependencies and build output
+node_modules/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Local AI tooling state
+.claude/settings.local.json
+.playwright-mcp/

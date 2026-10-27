@@ -1,0 +1,44 @@
+version: 1
+
+project:
+  name: agent-platform
+  language: typescript
+  framework: nextjs
+
+architecture:
+  style: modular monorepo
+  notes: Two source folders, frontend/ (Next.js UI) and backend/ (API, worker and AI agent runtime in one codebase); single-organization tenancy. Layout and phases are in docs/decisions.md.
+
+# `build` is added with the first app (Phase 2/3); the backend ships TypeScript source and has no build step yet. The root scripts run the backend's scripts.
+verification:
+  commands:
+    test: pnpm test
+    lint: pnpm lint
+    typecheck: pnpm typecheck
+
+git:
+  integration_branch: develop
+  protected_branches:
+    - main
+    - master
+    - develop
+    - staging
+    - production
+    - release/*
+
+# Role decides what the agent may do for a person (core/policies/permissions.md in harness-engineering).
+# Only PM or PL may instruct the agent to push. Roles are granted by a human editing this file; DEV is the least-privilege default.
+members:
+  - name: Than Tran
+    role: DEV
+
+safety:
+  protected_paths:
+    - "**/.env*"
+    - "**/secrets/**"
+  forbidden_commands:
+    - npm publish
+    - npm run deploy
+    - docker push
+    - terraform
+    - aws
