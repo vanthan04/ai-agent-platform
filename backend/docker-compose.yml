@@ -3,10 +3,12 @@ services:
   postgres:
     image: postgres:17
     restart: unless-stopped
+    # The three values below are read from backend/.env when compose starts. If one is missing, the postgres image
+    # refuses to start and says so, so nothing runs with a blank password.
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in backend/.env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env}
-      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in backend/.env}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:

@@ -82,13 +82,13 @@ Members are named by `userId` as the authenticator reports it; there is no users
 
 ## Local setup
 
-1. Start Docker Desktop, then create `backend/.env` yourself (it is git-ignored; replace `change-me` with a password of your own):
+1. Start Docker Desktop, then create `backend/.env` yourself (it is git-ignored; replace `<your-password>`, in both places, with a password of your own made of letters and digits so it needs no escaping in the URL):
 
    ```text
    POSTGRES_USER=agent_platform
-   POSTGRES_PASSWORD=change-me
+   POSTGRES_PASSWORD=<your-password>
    POSTGRES_DB=agent_platform
-   DATABASE_URL=postgresql://agent_platform:change-me@localhost:5432/agent_platform
+   DATABASE_URL=postgresql://agent_platform:<your-password>@localhost:5432/agent_platform
    AUTH_MODE=dev
    ```
 
