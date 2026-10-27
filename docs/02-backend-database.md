@@ -6,6 +6,8 @@ Lưu dữ liệu thật, quản lý quyền và cung cấp provider/config API c
 ## Stack mục tiêu
 NestJS + TypeScript, Prisma và PostgreSQL, trừ khi Phase 0 phát hiện project hiện tại đã có lựa chọn tương đương hợp lý.
 
+Đã chốt 2026-10-27 (D17 trong `decisions.md`): NestJS 12, Prisma 7, PostgreSQL 17 chạy bằng Docker Compose khi phát triển. Lát cắt đầu tiên: dự án và vai trò theo dự án, với một user dev cố định phía sau interface `Authenticator` (D18).
+
 ## Module dự kiến
 - Auth và users.
 - Workspaces/memberships.

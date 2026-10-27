@@ -22,7 +22,7 @@ pnpm workspace (`frontend`, `backend`), strict TypeScript, Vitest, ESLint with t
 - The policy evaluator returns `allow`, `ask` or `deny`. `ask` means a persisted approval is required first. Unlike the harness, a secret file read is `deny`, not `ask`, because there is no human present mid-run.
 
 ## D6 Two source folders and the remote
-The code is split into two source folders: `frontend/` (Next.js UI) and `backend/` (API, worker and AI agent runtime in one codebase). The AI runtime is a backend module, not a third folder, unless O4 later chooses a separate service. Inside `backend/src/`, `domain` depends on nothing, `policy` depends only on `domain`, and later modules (`api`, `worker`, `agent`, `integrations`) may depend on both. A module folder is created only when its phase starts. `frontend/` exists so far only as a README; no framework is installed until O4 to O6 are decided.
+The code is split into two source folders: `frontend/` (Next.js UI) and `backend/` (API, worker and AI agent runtime in one codebase). The AI runtime is a backend module, not a third folder, unless O4 later chooses a separate service. Inside `backend/src/`, `domain` depends on nothing, `policy` depends only on `domain`, and later modules (`api`, `worker`, `agent`, `integrations`) may depend on both. A module folder is created only when its phase starts. `frontend/` exists so far only as a README; no frontend framework is installed yet. The backend stack is D17; the queue is still O6.
 
 The git remote `origin` is `https://github.com/vanthan04/ai-agent-platform.git`. `harness-engineering/` is git-ignored (D16). The earlier inner repository of `platform/agent-platform` had no commits and was merged into the outer one.
 
@@ -60,6 +60,58 @@ Decided 2026-10-27. One approval per publishing run, after verification and befo
 ## D16 Harness stays outside the repository
 Decided 2026-10-27. `harness-engineering/` is not part of this repository and stays git-ignored. It is not required to build or run the product.
 
+## D17 Backend stack
+Decided 2026-10-27. NestJS 12 (native ES modules), Prisma 7 with the `pg` driver adapter, PostgreSQL 17 started by Docker Compose for development (`backend/docker-compose.yml`). Why: it is the stack the plan proposed, Nest's module structure matches the planned `api`, `projects`, `mcp` and `worker` modules, and Nest 12 is ESM like the rest of the workspace. Consequences:
+- The Prisma client is generated into `backend/src/generated/` and git-ignored. Because dependencies are installed with `--ignore-scripts` (D4), the `test` and `typecheck` scripts run `prisma generate` first.
+- Decorators use TypeScript's `experimentalDecorators`; constructor injection names its token explicitly with `@Inject(...)`, so tests run under esbuild without `emitDecoratorMetadata`.
+- Data access sits behind a repository interface per module. The service and the HTTP layer are tested with an in-memory repository; the Postgres repository has its own test that runs only when `DATABASE_URL` is set.
+- Credentials never go in a committed file. `docker-compose.yml` and Prisma read them from `backend/.env` (git-ignored); the variables are listed in `backend/README.md`.
+
+## D18 Authentication seam and tenant isolation
+Decided 2026-10-27. Callers are identified by an `Authenticator` interface. Only `DevAuthenticator` exists: every request is one fixed user, and `loadConfig` refuses `AUTH_MODE=dev` when `NODE_ENV=production`, so nothing can be deployed until real authentication replaces it. Every route requires a user unless marked `@Public()`. The user and tenant come from the authenticator, never from a request body. Every repository method is scoped by tenant, and a project the caller is not a member of is reported as not found, the same as one that does not exist.
+
+## D19 Domain-driven structure of the backend
+Decided 2026-10-27. `backend/src/` is split into bounded contexts, one folder each, with a shared kernel:
+- `shared-kernel`: ids, `Role`, branch matching, `RepoRef`, `DomainError`. The only thing every context may use.
+- `projects`: the `Project` aggregate (members, roles, invariants), its use cases, storage and HTTP. Has all four layers.
+- `execution`: tasks, runs and their state machine, steps, events, artifacts, approval rules. Domain only for now.
+- `integrations`: provider descriptors, input snapshots, repository resolution. Domain only for now.
+- `policy`: allow, ask or deny for an agent action. Domain only for now.
+- `identity`: who is calling (`Authenticator` seam, guard, dev user).
+- `vault`: the secrets layer (encrypted storage behind a `SecretStore` port). Named `vault` because paths named `secrets` are protected from the AI coding agent.
+- `mcp`: the MCP servers connected to a project, and testing them.
+- `network` (like `config` and `database`, shared infrastructure, not a context): the only way the server calls a URL a user supplied (D21).
+- `config` (environment) and `app` (the composition root, health) sit beside the contexts.
+
+A context that has more than pure rules is split into `domain` (entities, value objects, domain errors, repository interfaces; no framework, no I/O), `application` (use cases and ports), `infrastructure` (Prisma, clock) and `interface` (controllers, request schemas, error mapping). Rules, enforced by ESLint in `backend/eslint.config.mjs` so `pnpm lint` fails on a violation:
+- dependencies point inwards: `domain` imports no other layer, no Nest, no Prisma, no `node:`; `application` imports neither `infrastructure` nor `interface`;
+- contexts depend only along the allowed list (`policy` and `identity` on the kernel; `execution` on the kernel and `policy`; `projects` on the kernel, `identity` and `policy`; `vault` on the kernel; `mcp` on the kernel, `identity`, `projects` and `vault`; the kernel on nothing) and only through the other context's `index.ts`;
+- no context imports `app`.
+A broken business rule is a `DomainError` with a `code`; the interface layer of its context turns the code into a response. A layer folder is created only when the context needs it.
+
+Consequences for decisions already taken: the project aggregate guarantees D12 (creator is PL, a user is a member once) and one more rule that follows from D10, a project always keeps at least one PL. Members are managed by id; there is still no users table.
+
+## D20 How the editable policy is built (implements D8 and D10)
+Chosen 2026-10-27 while building the slice; the lists below are proposals to confirm, change them by editing this file and `backend/src/policy/domain/baseline.ts`.
+- What a project edits is one value, `EditablePolicy`: programs a run may start without asking, programs forbidden on top of the baseline, branches protected on top of the baseline, and two limits (command timeout, tool calls per run) under fixed ceilings. It has no field for anything in the baseline, so no edit can relax it; a payload with an unknown field is refused.
+- The baseline is code and is always merged in: protected branches `main, master, develop, staging, production, release/*` (the list of `ai-manifest.yaml`); forbidden programs `aws, terraform, serverless, sls, ssh, scp`; the rules inside `evaluate()` (secret files, workspace escape, `.git` and `node_modules`, force push, git history commands, publish and deploy, merge and delete on external systems); publishing needs a persisted PM or PL approval (D3).
+- A project can never allow a shell or privilege escalation (`sh, bash, zsh, fish, dash, ksh, cmd, powershell, pwsh, sudo, su, doas, runas`), because allowing one lets a run do anything. A program also cannot be allowed and forbidden at once. Allowing programs that run arbitrary code by their arguments (`node`, `python`, `pnpm exec`) is still possible and is the project's own risk; `evaluate()` does not look inside their arguments (see the suspicions under "Reconciliation").
+- Versions are append-only rows: number, policy, author, time, comment. An edit names the version it saw (`expectedVersion`); if the policy changed meanwhile it is refused (409) instead of overwriting. An edit that changes nothing is refused (422). Version 0 is the default policy: nothing allowed, nothing extra protected, timeout 600 s, 100 tool calls. The stored JSON is validated again on every read, so a row that breaks today's rules is rejected rather than applied.
+- A project's members read the policy and its history; only a PM or PL saves a version (D10). DEV proposals are not built yet.
+- `allow` or `ask` per MCP tool is part of `EditablePolicy` (`mcpToolDecisions`, keyed `<connection>:<tool>`, at most 200) and reaches `evaluate()` through the new action `mcp_tool_call`: a tool listed as `allow` runs, every other tool asks, and this setting never denies. Policies saved before the field existed still read (it defaults to none).
+- Not built yet: `allow` or `ask` per external write operation, and recording the policy version on each run (needs the run executor).
+
+## D21 MCP connections and the secrets layer (implements D9 and D11)
+Decided 2026-10-27; the storage of tokens was chosen by the project owner (encrypted in the database with an application key).
+- A project's members see its MCP connections; only a PM or PL connects, replaces a token or removes one. A connection has a name that never changes (the policy refers to its tools as `<name>:<tool>`), an https address and optionally a bearer token. At most 10 per project.
+- The address must be https, a public DNS name, with no credentials, query or fragment; IP addresses (any notation), single-label names and internal suffixes (`.local`, `.internal`, `.corp`, …) are refused. This is the first line against server-side request forgery only: a name can still resolve to a private address, so the code that will call the server (next slice) must check where it connects and must not follow redirects blindly.
+- Tokens live in `vault`: AES-256-GCM, a fresh IV per value, the tenant and reference authenticated with the value so a copied or altered row cannot be read, key `SECRETS_ENCRYPTION_KEY` (base64 of 32 bytes) from the environment, never from the database or the code. A connection stores only a reference. No API returns a token or its reference; an error for a bad token names the field, never the value. Without the key the app starts, a connection without a token still works, and storing a token answers 503.
+- The key has no rotation yet: losing it makes stored tokens unreadable (enter them again); changing it needs a re-encryption step that is not built.
+- Testing a connection and discovering its tools (`POST …/test`) is built on the Streamable HTTP transport of MCP (initialize, ready notice, `tools/list` with pages, end of session); the older HTTP+SSE transport is not supported. Only a PM or PL may run it (it sends the token to the server), at most 5 times a minute per project (counted in the process, so per instance), and the answer is always HTTP 200 with `ok: true` and the tools, or `ok: false` and one word (`unreachable`, `blocked_address`, `timeout`, `response_too_large`, `unauthorized`, `bad_status`, `invalid_response`, `server_error`, `token_unavailable`). What the server answered is never passed on.
+- Every outbound call goes through `network/` (`SafeHttpClient`): https only; the name is resolved by our own lookup, which refuses the connection if any answer is not a public address, and the connection uses that checked address, so DNS rebinding cannot swap it afterwards; an IP address in a URL is checked directly; no redirects are followed, so a token cannot be passed to another host; no cookies, no compression, a 10 s deadline and a 1 MB limit. Verified against a real name that resolves to 127.0.0.1 (answered `blocked_address`).
+- Tool names and descriptions from a server are untrusted: names must match `[A-Za-z0-9_.-]{1,64}` and be unique, descriptions lose control characters and are cut to 300 characters, at most 500 tools over 10 pages. They are for display as plain text; they must not be put in a model prompt as instructions.
+- Not built yet: using a token at run time (calling a tool during a run), storing the discovered tools, and removal of the secrets of a deleted project.
+
 ## Boundary
 `harness-engineering` guides the AI coding agents that build this product. It is not a runtime and is not shipped. Product runtime (UI, API, queue, workers, provider adapters, integrations, approvals) lives only here. Do not copy harness rules into this repo; reference them.
 
@@ -71,7 +123,7 @@ The numbering above is this repository's. The implementation plan (`docs/` of th
 | Implementation plan | This repository |
 |---|---|
 | 0 audit | 0 governance and layout (audit done) |
-| – | 1 domain contracts (foundation the plan assumes; implemented in `backend/src/domain`, `backend/src/policy`) |
+| – | 1 domain contracts (foundation the plan assumes; implemented in `backend/src/execution`, `backend/src/integrations`, `backend/src/policy`, `backend/src/shared-kernel`) |
 | 1 frontend on mock data | 3 task UI on a fake executor |
 | 2 backend, database, provider registry | 2 persistence, API, auth, audit |
 | 3 execution engine | 4 orchestrator, queue, event stream |
@@ -85,20 +137,19 @@ Two ordering differences matter: the plan builds the UI before the backend, and 
 Where D7 to D9 land: project, policy and MCP connection records and their API in phase 2; the screens to add a project, edit policy and connect MCP in phase 3 (on a fake data source first); evaluating the stored policy and MCP tool calls in phases 5 and 6, when the tool layer exists.
 
 ## Reconciliation with the implementation plan
-Recorded from the Phase 0 audit. Facts are checked against the domain and policy code, now `backend/src/domain` and `backend/src/policy`.
+Recorded from the Phase 0 audit. Facts are checked against the domain and policy code, now in `backend/src/execution`, `backend/src/integrations` and `backend/src/policy` (D19).
 
 - **Run states.** Code: `queued, preparing, analyzing, planning, implementing, verifying, awaiting_approval, publishing, succeeded, rejected, failed, cancelled`. Plan: adds `RESOLVING_INPUT`, `RESOLVING_REPOSITORY`, `REVIEWING_OUTPUT` and `BLOCKED`, and has no `rejected`. An ambiguous repository target ends in `blocked` (D14); input and repository resolution stay inside `preparing`.
 - **Approval.** Code asks once, after verification and before publishing, bound to run, diff hash and target branch (D3, D5). The plan has `WAITING_APPROVAL` after planning and also binds approval to the diff hash in its output phase. D15 keeps the single publish approval.
-- **Stack.** D4 fixes a TypeScript monorepo with zod. The plan proposes NestJS, Prisma, PostgreSQL and a Python AI runtime. None of these exist yet (O4, O5).
+- **Stack.** D4 fixes a TypeScript monorepo with zod. The plan proposes NestJS, Prisma, PostgreSQL and a Python AI runtime. The first three are now chosen (D17); the AI runtime language is still open (O4).
 - **Tenancy.** D2 uses one organization with a `tenantId` column. The plan names `Workspace` and `WorkspaceMember` (O7).
-- **Domain gaps.** Added in phase 1 (2026-10-27): provider descriptor with a declarative config schema, input snapshot with content hash, repository resolution with base commit SHA, idempotency key, correlation id, `projectId` on `Task` and `Run`, and the `blocked` status. Still missing: repository mapping, a `Project` entity, and the validation of a configuration against a descriptor (phase 2). `RepoProvider` is the fixed enum `github | codecommit` and `OutputKind` is `report | diff | test_report | pull_request`; the plan also lists a JSON artifact and a Jira comment. D7 to D9 add more: a `Project` entity, a stored policy with versions, an MCP connection, and a policy action for an MCP tool call (`Action` has no such kind today; an MCP write would currently fit only `external_write`).
+- **Domain gaps.** Added in phase 1 (2026-10-27): provider descriptor with a declarative config schema, input snapshot with content hash, repository resolution with base commit SHA, idempotency key, correlation id, `projectId` on `Task` and `Run`, and the `blocked` status. Added in phase 2: the `Project` aggregate with members (D19) and repository mappings with allowed branches (a repository's address must be https or ssh and never carry credentials; a pattern that matches every branch is refused; the default branch must be an allowed one). Still missing: the validation of a configuration against a descriptor, and wiring `isBranchAllowed` into repository resolution (phase 4). `RepoProvider` is the fixed enum `github | codecommit` and `OutputKind` is `report | diff | test_report | pull_request`; the plan also lists a JSON artifact and a Jira comment. D7 to D9 add more: a `Project` entity, a stored policy with versions, an MCP connection, and a policy action for an MCP tool call (`Action` has no such kind today; an MCP write would currently fit only `external_write`).
 - **Policy package.** It restates harness git and secret rules in code (`GIT_BLOCKED`, `isSecretPath`). The boundary says to reference harness rules, not copy them, so the two can drift. Before Phase 5, review three points: whether an allowed executable such as `node` or `pnpm` is allowed whatever its arguments, whether `git fetch` should count as touching the remote, and whether git's `-c` option can inject configuration. These are unverified suspicions, not confirmed defects.
 
 ## Open decisions
-Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D17 onward) in a reviewed change.
+Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D22 onward) in a reviewed change.
 
 - **O4 AI runtime language.** TypeScript as a backend module (the current layout, two source folders) or a separate Python service, which would add a third folder (`ai/`). Proposal: stay with the module; decide at Phase 6 with a minimal agent loop, nothing before it needs Python.
-- **O5 Backend framework, ORM, database.** NestJS, Prisma and PostgreSQL as the plan suggests, or another choice that fits D4. Must be decided before Phase 2. Record the reason here per the product rules.
 - **O6 Queue and event transport.** Unchosen. Decide before Phase 4 from the real hosting environment; polling first, server-sent events later.
 - **O7 Tenant and workspace.** Proposal: keep `tenantId` (D2) and treat a workspace as a later grouping under it only if a use case appears.
 - **O8 Where the plan documents live.** Resolved by the layout: in `docs/` of this repository, next to this file.## Actions for a human
