@@ -17,7 +17,7 @@ import {
   type ProjectCatalog,
 } from "../../../src/execution";
 import { CorrelationId, IdempotencyKey, RepositoryMappingId, Role, TenantId, UserId } from "../../../src/shared-kernel";
-import { InMemoryRunRepository, InMemoryTaskRepository } from "../../support/in-memory-execution.repositories";
+import { InMemoryResolutionRepository, InMemoryRunRepository, InMemoryTaskRepository } from "../../support/in-memory-execution.repositories";
 import { NOW } from "../../support/time";
 
 const user = (userId: string, tenantId = "tenant-1"): AuthUser => ({ userId: UserId.parse(userId), tenantId: TenantId.parse(tenantId) });
@@ -69,7 +69,7 @@ describe("tasks and runs", () => {
   let runs: RunsService;
   let taskId: string;
 
-  const build = (repo: InMemoryRunRepository = runRepo) => new RunsService(repo, taskRepo, catalog(), { now: () => NOW });
+  const build = (repo: InMemoryRunRepository = runRepo) => new RunsService(repo, taskRepo, catalog(), { now: () => NOW }, new InMemoryResolutionRepository());
 
   beforeEach(async () => {
     taskRepo = new InMemoryTaskRepository();

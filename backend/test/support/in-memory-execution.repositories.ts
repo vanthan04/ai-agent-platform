@@ -5,7 +5,10 @@ import {
   RunStateConflictError,
   TaskHasActiveRunError,
   isActive,
+  type ResolutionRepository,
+  type RunBaseCommit,
   type RunEventDraft,
+  type RunQueue,
   type RunRepository,
   type RunStatus,
   type Task,
@@ -39,7 +42,7 @@ const eventOf = (run: Run, seq: number, draft: RunEventDraft, at: string): RunEv
   RunEvent.parse({ id: `evt-${run.id}-${seq}`, tenantId: run.tenantId, runId: run.id, seq, at, ...draft });
 
 /** Same contract as the Postgres run store, kept in memory: the same two uniqueness rules and the same compare-and-set. */
-export class InMemoryRunRepository implements RunRepository {
+export class InMemoryRunRepository implements RunRepository, RunQueue {
   protected readonly runs: Run[] = [];
   private readonly events_ = new Map<string, RunEvent[]>();
   private counter = 0;
@@ -92,8 +95,41 @@ export class InMemoryRunRepository implements RunRepository {
     this.events_.set(next.id, [...events, eventOf(next, events.length + 1, event, at)]);
   }
 
+  async appendEvent(tenantId: TenantId, projectId: ProjectId, runId: RunId, event: RunEventDraft, at: string): Promise<void> {
+    const run = await this.findById(tenantId, projectId, runId);
+    if (!run) throw new Error("run not found in this project");
+    const events = this.events_.get(run.id) ?? [];
+    this.events_.set(run.id, [...events, eventOf(run, events.length + 1, event, at)]);
+  }
+
+  async listQueued(limit: number): Promise<Run[]> {
+    return this.runs.filter((run) => run.status === "queued").slice(0, limit);
+  }
+
+  async listStalled(status: RunStatus, idleSince: string, limit: number): Promise<Run[]> {
+    const cutoff = new Date(idleSince).getTime();
+    return this.runs
+      .filter((run) => run.status === status)
+      .filter((run) => (this.events_.get(run.id) ?? []).every((event) => new Date(event.at).getTime() <= cutoff))
+      .slice(0, limit);
+  }
+
   async events(tenantId: TenantId, projectId: ProjectId, runId: RunId, afterSeq: number, limit: number): Promise<RunEvent[]> {
     const run = await this.findById(tenantId, projectId, runId);
     return run ? (this.events_.get(run.id) ?? []).filter((event) => event.seq > afterSeq).slice(0, limit) : [];
+  }
+}
+
+/** Same contract as the Postgres resolution store, kept in memory. */
+export class InMemoryResolutionRepository implements ResolutionRepository {
+  private readonly saved = new Map<string, RunBaseCommit>();
+
+  async save(_tenantId: TenantId, _projectId: ProjectId, runId: RunId, resolution: RunBaseCommit): Promise<void> {
+    if (this.saved.has(runId)) throw new Error("this run already has a resolution");
+    this.saved.set(runId, resolution);
+  }
+
+  async find(_tenantId: TenantId, _projectId: ProjectId, runId: RunId): Promise<RunBaseCommit | undefined> {
+    return this.saved.get(runId);
   }
 }

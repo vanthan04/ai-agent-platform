@@ -1,6 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { z } from "zod";
-import { CorrelationId, IdempotencyKey, RepositoryMappingId } from "../../shared-kernel";
+import { BranchName, CorrelationId, IdempotencyKey, RepositoryMappingId } from "../../shared-kernel";
 import { OutputKind, RunStatus, TaskSource } from "../domain";
 
 const text = (max: number) => z.string().trim().max(max);
@@ -11,7 +11,7 @@ export const CreateTaskBody = z
     description: text(20_000).default(""),
     source: TaskSource.default({ type: "manual" }),
     repositoryId: RepositoryMappingId,
-    baseBranch: z.string().trim().min(1).max(255),
+    baseBranch: BranchName,
     inputs: z.record(z.string().min(1).max(64), z.string().max(2_000)).refine((inputs) => Object.keys(inputs).length <= 20, "at most 20 inputs").default({}),
     outputs: z.array(OutputKind).min(1).max(4).default(["report"]),
   })

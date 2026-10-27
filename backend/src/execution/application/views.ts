@@ -14,6 +14,13 @@ export interface TaskView {
   createdAt: string;
 }
 
+/** The commit the run started from, once the worker has prepared it. */
+export interface BaseCommitView {
+  source: string;
+  sha: string;
+  resolvedAt: string;
+}
+
 export interface RunView {
   id: string;
   taskId: string;
@@ -28,6 +35,8 @@ export interface RunView {
   finishedAt?: string;
   failureReason?: string;
   blockedReason?: string;
+  /** Only on a single run (`GET …/runs/:runId`), not in lists. */
+  baseCommit?: BaseCommitView;
 }
 
 /** `created` is false when the same idempotency key had already created this run. */

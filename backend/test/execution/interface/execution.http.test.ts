@@ -4,11 +4,11 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../../../src/app/app.module";
 import { APP_CONFIG, loadConfig } from "../../../src/config/config";
-import { RUN_REPOSITORY, TASK_REPOSITORY } from "../../../src/execution";
+import { RESOLUTION_REPOSITORY, RUN_REPOSITORY, TASK_REPOSITORY } from "../../../src/execution";
 import { AUTHENTICATOR, type AuthUser, type AuthenticationRequest, type Authenticator } from "../../../src/identity";
 import { PROJECT_POLICY_REPOSITORY, PROJECT_REPOSITORY } from "../../../src/projects";
 import { TenantId, UserId } from "../../../src/shared-kernel";
-import { InMemoryRunRepository, InMemoryTaskRepository } from "../../support/in-memory-execution.repositories";
+import { InMemoryResolutionRepository, InMemoryRunRepository, InMemoryTaskRepository } from "../../support/in-memory-execution.repositories";
 import { InMemoryProjectPolicyRepository } from "../../support/in-memory-project-policy.repository";
 import { InMemoryProjectRepository } from "../../support/in-memory-project.repository";
 
@@ -26,6 +26,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 describe("tasks and runs over HTTP", () => {
   let app: INestApplication;
   let runRepo: InMemoryRunRepository;
+  const resolutions = new InMemoryResolutionRepository();
   const as = (user: string) => ({ "x-test-user": user });
   const http = () => request(app.getHttpServer());
 
@@ -42,6 +43,8 @@ describe("tasks and runs over HTTP", () => {
       .useValue(new InMemoryProjectPolicyRepository())
       .overrideProvider(TASK_REPOSITORY)
       .useValue(new InMemoryTaskRepository())
+      .overrideProvider(RESOLUTION_REPOSITORY)
+      .useValue(resolutions)
       .overrideProvider(RUN_REPOSITORY)
       .useValue(runRepo)
       .compile();
@@ -105,6 +108,8 @@ describe("tasks and runs over HTTP", () => {
     await post({ ...good, inputs: { a: "x".repeat(2_001) } }).expect(400);
     await post({ ...good, repositoryId: "someone-elses-repository" }).expect(422);
     await post({ ...good, baseBranch: "main" }).expect(422);
+    await post({ ...good, baseBranch: "release/*" }).expect(400);
+    await post({ ...good, baseBranch: "-rf" }).expect(400);
     await post({ ...good, source: { type: "jira", issueKey: "ABC-123" }, outputs: ["diff", "pull_request"] }).expect(201);
   });
 
@@ -167,6 +172,18 @@ describe("tasks and runs over HTTP", () => {
     expect((await http().get(`/projects/${project}/runs/${run}/events?after=1`).set(as("dev")).expect(200)).body).toHaveLength(1);
     expect((await http().get(`/projects/${project}/runs/${run}/events?after=2`).set(as("dev")).expect(200)).body).toEqual([]);
     await http().get(`/projects/${project}/runs/${run}/events?after=-1`).set(as("dev")).expect(400);
+  });
+
+  it("shows the commit a run started from on the single run, once the worker has prepared it, and not in lists", async () => {
+    const { project, repository } = await setup("HttpBaseCommit");
+    const task = await newTask(project, repository);
+    const run = (await http().post(`/projects/${project}/tasks/${task}/runs`).set(as("dev")).set("Idempotency-Key", "k1").expect(201)).body as { id: string; projectId?: string };
+    expect((await http().get(`/projects/${project}/runs/${run.id}`).set(as("dev")).expect(200)).body).not.toHaveProperty("baseCommit");
+    await resolutions.save("tenant-1" as never, project as never, run.id as never, { source: "user_selected", baseCommitSha: "0123456789abcdef0123456789abcdef01234567", resolvedAt: "2026-10-27T10:00:00Z" });
+    const single = await http().get(`/projects/${project}/runs/${run.id}`).set(as("dev")).expect(200);
+    expect(single.body.baseCommit).toEqual({ source: "user_selected", sha: "0123456789abcdef0123456789abcdef01234567", resolvedAt: "2026-10-27T10:00:00Z" });
+    const list = await http().get(`/projects/${project}/runs`).set(as("dev")).expect(200);
+    expect(list.body[0]).not.toHaveProperty("baseCommit");
   });
 
   it("cancels: the starter or a PM or PL may, another DEV may not, twice is 409, publishing is 409", async () => {

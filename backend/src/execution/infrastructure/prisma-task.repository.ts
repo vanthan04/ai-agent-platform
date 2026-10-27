@@ -79,7 +79,7 @@ export class PrismaTaskRepository implements TaskRepository {
   async list(tenantId: TenantId, projectId: ProjectId, limit: number): Promise<Task[]> {
     const rows = await this.prisma.db().task.findMany({
       where: { projectId, project: { tenantId } },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }], // the id only settles a tie, so the order never changes between calls
       take: limit,
     });
     return rows.map((row) => toTask(row, tenantId));

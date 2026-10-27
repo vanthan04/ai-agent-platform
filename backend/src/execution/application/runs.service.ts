@@ -11,12 +11,13 @@ import {
   canCancelRun,
   cancelRun,
   createRun,
+  type ResolutionRepository,
   type Run,
   type RunRepository,
   type RunStatus,
   type TaskRepository,
 } from "../domain";
-import { CLOCK, PROJECT_CATALOG, RUN_REPOSITORY, TASK_REPOSITORY, type Clock, type ProjectCatalog } from "./ports";
+import { CLOCK, PROJECT_CATALOG, RESOLUTION_REPOSITORY, RUN_REPOSITORY, TASK_REPOSITORY, type Clock, type ProjectCatalog } from "./ports";
 import type { RunEventView, RunView, StartedRun } from "./views";
 
 export const toRunView = (run: Run): RunView => ({
@@ -43,6 +44,7 @@ export class RunsService {
     @Inject(TASK_REPOSITORY) private readonly tasks: TaskRepository,
     @Inject(PROJECT_CATALOG) private readonly catalog: ProjectCatalog,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RESOLUTION_REPOSITORY) private readonly resolutions: ResolutionRepository,
   ) {}
 
   /**
@@ -90,7 +92,9 @@ export class RunsService {
 
   async get(user: AuthUser, projectId: string, runId: string): Promise<RunView> {
     await this.requireMember(user, projectId);
-    return toRunView(await this.find(user.tenantId, projectId, runId));
+    const run = await this.find(user.tenantId, projectId, runId);
+    const base = await this.resolutions.find(user.tenantId, run.projectId, run.id);
+    return { ...toRunView(run), ...(base ? { baseCommit: { source: base.source, sha: base.baseCommitSha, resolvedAt: base.resolvedAt } } : {}) };
   }
 
   /** The recorded events of a run after `afterSeq`; a client that lost its connection asks again from the last number it saw. */

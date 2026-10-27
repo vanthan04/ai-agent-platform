@@ -117,7 +117,7 @@ export class PrismaRunRepository implements RunRepository {
         ...(filter.taskId === undefined ? {} : { taskId: filter.taskId }),
         ...(filter.status === undefined ? {} : { status: filter.status }),
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: filter.limit,
     });
     return rows.map((row) => toRun(row, tenantId));
@@ -147,6 +147,22 @@ export class PrismaRunRepository implements RunRepository {
         data: { runId: next.id, seq: (last._max.seq ?? 0) + 1, id: randomUUID(), type: event.type, payload: payloadOf(event), at: new Date(at) },
       });
     });
+  }
+
+  async appendEvent(tenantId: TenantId, projectId: ProjectId, runId: RunIdType, event: RunEventDraft, at: string): Promise<void> {
+    const db = this.prisma.db();
+    const run = await db.run.findFirst({ where: { id: runId, projectId, project: { tenantId } }, select: { id: true } });
+    if (!run) throw new Error("run not found in this project");
+    // Two writers may pick the same number; the primary key refuses the second, which then tries again with the next one.
+    for (let attempt = 0; ; attempt++) {
+      const last = await db.runEvent.aggregate({ _max: { seq: true }, where: { runId } });
+      try {
+        await db.runEvent.create({ data: { runId, seq: (last._max.seq ?? 0) + 1, id: randomUUID(), type: event.type, payload: payloadOf(event), at: new Date(at) } });
+        return;
+      } catch (error) {
+        if (!isUniqueViolation(error) || attempt >= 5) throw error;
+      }
+    }
   }
 
   async events(tenantId: TenantId, projectId: ProjectId, runId: RunIdType, afterSeq: number, limit: number): Promise<RunEvent[]> {

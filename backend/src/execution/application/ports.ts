@@ -3,6 +3,8 @@ import type { RepoProvider, Role } from "../../shared-kernel";
 
 export const TASK_REPOSITORY = Symbol("TASK_REPOSITORY");
 export const RUN_REPOSITORY = Symbol("RUN_REPOSITORY");
+export const RESOLUTION_REPOSITORY = Symbol("RESOLUTION_REPOSITORY");
+export const RUN_QUEUE = Symbol("RUN_QUEUE");
 export const PROJECT_CATALOG = Symbol("PROJECT_CATALOG");
 export const CLOCK = Symbol("CLOCK");
 

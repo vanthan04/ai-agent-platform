@@ -63,7 +63,7 @@ describe.skipIf(!url)("Prisma task and run repositories (Postgres)", () => {
     return task;
   };
 
-  const newRun = (task: Task, key: string, attempt = 1) =>
+  const newRun = (task: Task, key: string, attempt = 1, now = NOW) =>
     createRun({
       id: runs.nextId(),
       tenantId: task.tenantId,
@@ -73,7 +73,7 @@ describe.skipIf(!url)("Prisma task and run repositories (Postgres)", () => {
       idempotencyKey: IdempotencyKey.parse(key),
       correlationId: CorrelationId.parse(`corr-${randomUUID()}`),
       requestedBy: alice,
-      now: NOW,
+      now,
     });
 
   it("saves a task with its repository copy and reads it back for its tenant and project only", async () => {
@@ -84,7 +84,7 @@ describe.skipIf(!url)("Prisma task and run repositories (Postgres)", () => {
     expect(new Date(loaded?.createdAt ?? "").getTime()).toBe(new Date(NOW).getTime());
     expect(await tasks.findById(tenantB, project.id, task.id)).toBeUndefined();
     expect(await tasks.findById(tenantA, (await newProject(tenantA, "ExecTasksOther")).id, task.id)).toBeUndefined();
-    await newTask(project, "Second");
+    await newTask(project, "Second", { createdAt: "2026-10-27T10:00:01Z" });
     expect((await tasks.list(tenantA, project.id, 10)).map((t) => t.title)).toEqual(["Second", "With jira"]);
     expect(await tasks.list(tenantA, project.id, 1)).toHaveLength(1);
     expect(await tasks.list(tenantB, project.id, 10)).toEqual([]);
@@ -127,7 +127,7 @@ describe.skipIf(!url)("Prisma task and run repositories (Postgres)", () => {
     const cancelled = cancelRun(first, NOW);
     await runs.transition(tenantA, project.id, cancelled, "queued", { type: "run.status_changed", from: "queued", to: "cancelled" }, NOW);
     expect(await runs.latestAttempt(tenantA, task.id)).toBe(1);
-    const second = newRun(task, "key-2", 2);
+    const second = newRun(task, "key-2", 2, "2026-10-27T10:00:05Z");
     await runs.create(second, queued);
     expect(await runs.latestAttempt(tenantA, task.id)).toBe(2);
     expect((await runs.findById(tenantA, project.id, first.id))?.status).toBe("cancelled");
