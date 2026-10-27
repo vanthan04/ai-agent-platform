@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ProjectId, RepoRef, TaskId, TenantId, Timestamp, UserId } from "../../shared-kernel";
+import { ProjectId, RepoRef, RepositoryMappingId, TaskId, TenantId, Timestamp, UserId } from "../../shared-kernel";
 
 export const TaskSource = z.discriminatedUnion("type", [
   z.object({ type: z.literal("manual") }),
@@ -18,6 +18,9 @@ export const Task = z.object({
   title:z.string().min(1).max(200),
   description: z.string().max(20_000),
   source: TaskSource,
+  /** The repository connection of the project this task works on, chosen by a person (never by the model). */
+  repositoryId: RepositoryMappingId,
+  /** What that connection said when the task was created: a later change to the connection does not rewrite the task. */
   repo: RepoRef,
   inputs: z.record(z.string(), z.string()),
   outputs: z.array(OutputKind).min(1),

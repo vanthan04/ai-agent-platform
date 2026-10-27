@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CorrelationId, IdempotencyKey, ProjectId, RunId, TaskId, TenantId, Timestamp } from "../../shared-kernel";
+import { CorrelationId, IdempotencyKey, ProjectId, RunId, TaskId, TenantId, Timestamp, UserId } from "../../shared-kernel";
 
 export const RunStatus = z.enum([
   "queued",
@@ -31,6 +31,8 @@ export const Run = z.object({
   attempt: z.number().int().positive(),
   idempotencyKey: IdempotencyKey,
   correlationId: CorrelationId,
+  /** Who started this run; with a PM or PL, the only people who may cancel it. */
+  requestedBy: UserId,
   status: RunStatus,
   /** Snapshot of `taskPublishes(task)` at run creation; decides whether approval is part of the path. */
   publishes: z.boolean(),

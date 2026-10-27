@@ -9,7 +9,7 @@ const CONTEXTS = ["shared-kernel", "policy", "execution", "integrations", "ident
 const ALLOWED = {
   "shared-kernel": [],
   policy: ["shared-kernel"],
-  execution: ["shared-kernel", "policy"],
+  execution: ["shared-kernel", "policy", "identity", "projects"],
   integrations: ["shared-kernel"],
   identity: ["shared-kernel"],
   projects: ["shared-kernel", "identity", "policy"],

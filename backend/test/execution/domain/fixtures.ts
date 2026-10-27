@@ -16,6 +16,7 @@ export function makeRun(status: RunStatus, publishes: boolean): Run {
     attempt: 1,
     idempotencyKey: "idem-1",
     correlationId: "corr-1",
+    requestedBy: "user-1",
     status,
     publishes,
     createdAt: NOW,
