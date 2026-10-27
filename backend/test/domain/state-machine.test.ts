@@ -9,6 +9,7 @@ const LEGAL_PAIRS: ReadonlyArray<readonly [RunStatus, RunStatus]> = [
   ["queued", "preparing"],
   ["queued", "cancelled"],
   ["preparing", "analyzing"],
+  ["preparing", "blocked"],
   ["preparing", "failed"],
   ["preparing", "cancelled"],
   ["analyzing", "planning"],
@@ -57,7 +58,7 @@ describe("transition()", () => {
   });
 
   it("refuses to leave a terminal state", () => {
-    for (const status of ["succeeded", "rejected", "failed", "cancelled"] as const) {
+    for (const status of ["succeeded", "rejected", "failed", "cancelled", "blocked"] as const) {
       expect(transition(makeRun(status, false), "queued", NOW).ok).toBe(false);
     }
   });
@@ -68,6 +69,23 @@ describe("transition()", () => {
       ok: true,
       run: { failureReason: "tests red" },
     });
+  });
+
+  it("blocks only from preparing, with a reason, and records it", () => {
+    expect(transition(makeRun("preparing", false), "blocked", NOW).ok).toBe(false);
+    expect(transition(makeRun("preparing", false), "blocked", NOW, { blockedReason: "two repositories match" })).toMatchObject({
+      ok: true,
+      run: { status: "blocked", blockedReason: "two repositories match", finishedAt: NOW },
+    });
+    for (const status of ["queued", "analyzing", "planning", "implementing", "verifying", "awaiting_approval", "publishing"] as const) {
+      expect(transition(makeRun(status, false), "blocked", NOW, { blockedReason: "x" }).ok).toBe(false);
+    }
+  });
+
+  it("a blocked run is never continued: moving on needs a new run", () => {
+    const blocked = transition(makeRun("preparing", false), "blocked", NOW, { blockedReason: "x" });
+    if (!blocked.ok) throw new Error("expected a blocked run");
+    for (const to of ALL) expect(transition(blocked.run, to, NOW, { failureReason: "x", blockedReason: "x" }).ok).toBe(false);
   });
 
   it("a publishing run cannot skip approval to succeed, and a non-publishing run cannot ask for one", () => {

@@ -43,6 +43,8 @@ Runtime là một execution component, không phải giao diện người dùng 
 - Jira content, README, repo files và tool outputs là untrusted data.
 - Giới hạn tool count, execution time, output size và model budget.
 - Không báo tests pass nếu chưa thực thi command và lưu exit code.
+- Tool từ MCP server của dự án (D9) vào tool registry như tool khác, nhưng mô tả và kết quả của chúng là untrusted data. Mỗi lần gọi phải qua policy của dự án trước khi chạy; tool chưa biết mặc định `ask`; ghi lại phiên bản policy mà run đã dùng.
+- MCP server dạng stdio (chạy process) chỉ chạy trong sandbox, không chạy trên API host (D11).
 
 ## Acceptance criteria
 - Output validate được bằng schema.

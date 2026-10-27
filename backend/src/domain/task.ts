@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TaskId, TenantId, Timestamp, UserId } from "./ids";
+import { ProjectId, TaskId, TenantId, Timestamp, UserId } from "./ids";
 
 export const RepoProvider = z.enum(["github", "codecommit"]);
 export type RepoProvider = z.infer<typeof RepoProvider>;
@@ -25,7 +25,8 @@ export type OutputKind = z.infer<typeof OutputKind>;
 export const Task = z.object({
   id: TaskId,
   tenantId: TenantId,
-  title: z.string().min(1).max(200),
+  projectId: ProjectId,
+  title:z.string().min(1).max(200),
   description: z.string().max(20_000),
   source: TaskSource,
   repo: RepoRef,

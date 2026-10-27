@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { RunEvent, Task, TaskId, checkEventSequence, taskPublishes } from "../../src/domain";
+import { Run, RunEvent, Task, TaskId, checkEventSequence, taskPublishes } from "../../src/domain";
 import { NOW } from "./fixtures";
 
 const baseTask = {
   id: "task-1",
   tenantId: "tenant-1",
+  projectId: "project-1",
   title: "Add retry to uploader",
   description: "",
   source: { type: "manual" },
@@ -35,6 +36,33 @@ describe("Task", () => {
   it("publishes only when a pull_request output is requested", () => {
     expect(taskPublishes({ outputs: ["report", "diff"] })).toBe(false);
     expect(taskPublishes({ outputs: ["diff", "pull_request"] })).toBe(true);
+  });
+});
+
+describe("project scope on Task and Run", () => {
+  const baseRun = {
+    id: "run-1",
+    tenantId: "tenant-1",
+    projectId: "project-1",
+    taskId: "task-1",
+    attempt: 1,
+    idempotencyKey: "idem-1",
+    correlationId: "corr-1",
+    status: "queued",
+    publishes: false,
+    createdAt: NOW,
+  };
+
+  it("requires a project on a task and on a run", () => {
+    expect(Task.safeParse({ ...baseTask, projectId: undefined }).success).toBe(false);
+    expect(Run.safeParse(baseRun).success).toBe(true);
+    expect(Run.safeParse({ ...baseRun, projectId: undefined }).success).toBe(false);
+  });
+
+  it("requires an idempotency key and a correlation id on a run", () => {
+    expect(Run.safeParse({ ...baseRun, idempotencyKey: undefined }).success).toBe(false);
+    expect(Run.safeParse({ ...baseRun, correlationId: undefined }).success).toBe(false);
+    expect(Run.safeParse({ ...baseRun, idempotencyKey: "" }).success).toBe(false);
   });
 });
 

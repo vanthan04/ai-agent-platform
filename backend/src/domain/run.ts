@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RunId, TaskId, TenantId, Timestamp } from "./ids";
+import { CorrelationId, IdempotencyKey, ProjectId, RunId, TaskId, TenantId, Timestamp } from "./ids";
 
 export const RunStatus = z.enum([
   "queued",
@@ -14,18 +14,23 @@ export const RunStatus = z.enum([
   "rejected",
   "failed",
   "cancelled",
+  /** The run cannot continue without a person (for example an ambiguous repository); see D14. */
+  "blocked",
 ]);
 export type RunStatus = z.infer<typeof RunStatus>;
 
-export const TERMINAL_STATUSES: readonly RunStatus[] = ["succeeded", "rejected", "failed", "cancelled"];
+export const TERMINAL_STATUSES: readonly RunStatus[] = ["succeeded", "rejected", "failed", "cancelled", "blocked"];
 
 export const isTerminal = (status: RunStatus): boolean => TERMINAL_STATUSES.includes(status);
 
 export const Run = z.object({
   id: RunId,
   tenantId: TenantId,
+  projectId: ProjectId,
   taskId: TaskId,
   attempt: z.number().int().positive(),
+  idempotencyKey: IdempotencyKey,
+  correlationId: CorrelationId,
   status: RunStatus,
   /** Snapshot of `taskPublishes(task)` at run creation; decides whether approval is part of the path. */
   publishes: z.boolean(),
@@ -33,5 +38,6 @@ export const Run = z.object({
   startedAt: Timestamp.optional(),
   finishedAt: Timestamp.optional(),
   failureReason: z.string().max(1_000).optional(),
+  blockedReason: z.string().max(1_000).optional(),
 });
 export type Run = z.infer<typeof Run>;

@@ -3,7 +3,7 @@ import { isTerminal, type Run, type RunStatus } from "./run";
 
 const LEGAL: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   queued: ["preparing", "cancelled"],
-  preparing: ["analyzing", "failed", "cancelled"],
+  preparing: ["analyzing", "blocked", "failed", "cancelled"],
   analyzing: ["planning", "failed", "cancelled"],
   planning: ["implementing", "failed", "cancelled"],
   implementing: ["verifying", "failed", "cancelled"],
@@ -14,6 +14,7 @@ const LEGAL: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   rejected: [],
   failed: [],
   cancelled: [],
+  blocked: [],
 };
 
 export function nextStatuses(from: RunStatus): readonly RunStatus[] {
@@ -27,6 +28,8 @@ export interface TransitionContext {
   publish?: Omit<PublishExpectation, "runId">;
   /** Required to enter `failed`. */
   failureReason?: string;
+  /** Required to enter `blocked`. */
+  blockedReason?: string;
 }
 
 export type TransitionResult = { ok: true; run: Run } | { ok: false; reason: string };
@@ -57,10 +60,12 @@ export function transition(
   }
 
   if (to === "failed" && !ctx.failureReason) return refuse("failureReason is required");
+  if (to === "blocked" && !ctx.blockedReason) return refuse("blockedReason is required");
 
   const next: Run = { ...run, status: to };
   if (run.status === "queued" && to === "preparing") next.startedAt = at;
   if (isTerminal(to)) next.finishedAt = at;
   if (to === "failed" && ctx.failureReason) next.failureReason = ctx.failureReason;
+  if (to === "blocked" && ctx.blockedReason) next.blockedReason = ctx.blockedReason;
   return { ok: true, run: next };
 }

@@ -17,8 +17,11 @@ export function makeRun(status: RunStatus, publishes: boolean): Run {
   return Run.parse({
     id: "run-1",
     tenantId: "tenant-1",
+    projectId: "project-1",
     taskId: "task-1",
     attempt: 1,
+    idempotencyKey: "idem-1",
+    correlationId: "corr-1",
     status,
     publishes,
     createdAt: NOW,
