@@ -157,6 +157,7 @@ Decided 2026-10-28.
 - **The API key is a secret of the project**, stored encrypted in the vault (D11) like an MCP token: typed once, never returned, never in a prompt, log or event. A run with no key for the chosen provider is `blocked` with a reason a person can act on (D14).
 - **Model output is untrusted**, like any text (see the product rules): it can ask for a tool, never widen what the policy allows.
 - First stage to build: **analysis**, read-only. The agent reads the prepared repository at the stored base commit and writes a report. It changes nothing and publishes nothing; the sandbox (phase 5) and approval and publish (phase 7) come after.
+- **Built (2026-10-28):** `ModelSettings` per project and its API (`GET`, `PUT`, `DELETE /projects/:id/model`, PM or PL to change). The key is kept only for the provider and address it was given for: choosing another provider, or another address of an OpenAI-compatible server, deletes it, so a key is never sent to a server it was not given for. The model name is free text within a safe pattern, because providers add models often; `suggestedModels` is only a hint. The public-address check of D11 moved to the shared kernel (`isPublicHttpsUrl`) so MCP and the model address use one rule. Not built: the adapters, the analysis stage and the screen.
 - Still to decide inside the slice: how the agent reads the repository without a sandbox (proposal: the same https access as D23, files only, size limits), and the exact model list per provider.
 
 ## Boundary

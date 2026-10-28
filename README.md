@@ -16,6 +16,7 @@ backend/         API, worker and AI agent runtime in one codebase
   src/shared-kernel/  ids, roles, branch rules shared by every context
   src/projects/       project aggregate, use cases, storage, HTTP   (domain / application / infrastructure / interface)
   src/execution/      tasks and runs: state machine, approval rules, storage, HTTP
+  src/agent/          the model each project uses (provider, model, key); the AI runtime grows here
   src/worker/         the process that prepares queued runs (pnpm worker)
   src/integrations/   provider descriptors, input snapshots, repository resolution
   src/policy/         allow / ask / deny decisions for agent actions

@@ -14,6 +14,7 @@ src/
   identity/        domain/  application/  infrastructure/  interface/
   vault/           domain/  application/  infrastructure/    encrypted secret storage (SecretStore)
   mcp/             domain/  application/  infrastructure/  interface/   MCP servers connected to a project
+  agent/           domain/  application/  infrastructure/  interface/   the model a project uses (AI runtime to come, D25)
   worker/          application/  infrastructure/            the process that prepares queued runs; worker-main.ts starts it
   database/        the one Prisma client shared by every context
   network/         safe outbound HTTPS: public addresses only, no redirects, limits (D21)
@@ -45,7 +46,7 @@ Between contexts: `policy` and `identity` use the kernel; `execution` uses the k
 | `vault` | phase 2 | the secrets layer: `SecretStore` port, AES-256-GCM in Postgres with the key from `SECRETS_ENCRYPTION_KEY` (D21). Returns a `SecretRef`; no API reveals a secret. |
 | `mcp` | phase 2 | `McpConnection` per project: fixed name, https address of a public server, optional bearer token kept in the vault (D9, D11, D21). Testing a connection lists the server's tools through `network/`. Not yet: calling a tool during a run (phase 6), storing the discovered tools. The per-tool `allow`/`ask` setting is in the project policy (`mcpToolDecisions`, D20). |
 | `worker` | phase 3, first slice | its own process (`pnpm worker`): takes queued runs by compare-and-set, moves them to `preparing`, reads the commit of the base branch over https through `network/`, stores it, writes events, blocks a run that cannot be read and fails one whose worker stopped (D23). Today a prepared run ends `failed` with "stages after preparing are not implemented". Next: analysis, then the sandbox, then publish after a persisted PM or PL approval (D3). |
-| `agent` | planned, phase 6 | the AI runtime; every tool call goes through `policy.evaluate()`. |
+| `agent` | phase 6, first slice | `ModelSettings` per project: provider (Anthropic, Gemini or an OpenAI-compatible server), model name, and for the last an https address of a public server; the API key is kept in the vault and dropped when the provider or address changes (D25). Next: provider adapters, then the analysis stage; every tool call goes through `policy.evaluate()`. |
 
 ## API
 
@@ -72,6 +73,9 @@ Between contexts: `policy` and `identity` use the kernel; `execution` uses the k
 | `PUT /projects/:id/mcp-connections/:connectionId/token` | PM or PL | body `{ bearerToken }`; replaces the stored token; 404 unknown connection |
 | `POST /projects/:id/mcp-connections/:connectionId/test` | PM or PL | connects and lists the tools. 200 `{ ok: true, testedAt, protocolVersion, server, tools: [{ name, description }], skippedTools, truncated }` or `{ ok: false, testedAt, error }` with one word; 403 DEV; 404 unknown; 429 more than 5 tests a minute |
 | `DELETE /projects/:id/mcp-connections/:connectionId` | PM or PL | 204 and the stored token is deleted; 404 unknown |
+| `GET /projects/:id/model` | member | `{ providers, settings }`: the providers that can be chosen (whether they need an address, some suggested models) and the project's choice, `{ configured: false }` until one is set. `hasKey` says whether a key is stored; the key is never returned |
+| `PUT /projects/:id/model` | PM or PL | body `{ provider, model, baseUrl?, apiKey? }`; 200 the choice. `baseUrl` is required for `openai_compatible` and refused otherwise (400); a new `apiKey` replaces the old one; with no key the old one stays only if provider and address are unchanged. 403 DEV; 404 non-member; 503 key given but `SECRETS_ENCRYPTION_KEY` not set |
+| `DELETE /projects/:id/model` | PM or PL | 204; the choice and its stored key are deleted |
 | `POST /projects/:id/tasks` | member | body `{ title, description?, source?, repositoryId, baseBranch, inputs?, outputs? }`; 201 task with a copy of the repository; 400 bad body; 422 repository not connected to the project or base branch not allowed |
 | `GET /projects/:id/tasks` and `GET /projects/:id/tasks/:taskId` | member | newest first (`?limit`, up to 100); 404 unknown |
 | `POST /projects/:id/tasks/:taskId/runs` | member | header `Idempotency-Key` required, `X-Correlation-Id` optional. 201 a queued run; 200 the same run for a repeated key; 409 the task already has a run in progress or the key belongs to another task |
