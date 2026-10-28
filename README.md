@@ -7,7 +7,11 @@ Decisions and status: [docs/decisions.md](docs/decisions.md). Implementation pla
 ## Layout
 
 ```text
-frontend/        user interface (Next.js)                        not created yet
+frontend/        user interface (Next.js, Tailwind), D24
+  src/app/            pages: /projects, /projects/:id/execution, /projects/:id/setup/*, and the /api proxy
+  src/components/     screens (execution, setup, projects) and small UI parts (ui/)
+  src/lib/            typed API client, polling hooks, status rules, proxy
+  test/               vitest tests
 backend/         API, worker and AI agent runtime in one codebase
   src/shared-kernel/  ids, roles, branch rules shared by every context
   src/projects/       project aggregate, use cases, storage, HTTP   (domain / application / infrastructure / interface)
@@ -34,6 +38,16 @@ pnpm typecheck   # backend: prisma generate + tsc --noEmit
 ```
 
 Requires Node 22 or later and pnpm. Running the API needs PostgreSQL: see "Local setup" in [backend/README.md](backend/README.md).
+
+Running the UI (after the backend is up; the commands run from the repository root):
+
+```bash
+pnpm --filter @agent-platform/backend start     # API, default port 3001
+pnpm --filter @agent-platform/backend worker    # prepares queued runs
+pnpm --filter @agent-platform/frontend dev      # UI on http://localhost:3000
+```
+
+The UI reaches the API through its own `/api` route. If the API is not on `http://127.0.0.1:3001`, start the UI with `BACKEND_URL` set to its address.
 
 ## Git
 

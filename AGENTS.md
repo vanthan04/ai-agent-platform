@@ -2,7 +2,7 @@
 
 An AI Engineering Agent Platform: a web UI over an API, queue and sandboxed workers that accept tasks, run AI agents against repositories, and produce reviewable outputs behind human approval.
 
-Status: `backend/` has the domain (phase 1 contracts done), policy, auth (dev user only) and a first projects API on NestJS, Prisma and PostgreSQL (phase 2, first slice); `frontend/` is documented but not created. Layout, decisions and phases: `README.md` and `docs/decisions.md`. The implementation plan is in `docs/README.md` (phases 0 to 7, prompt templates in `docs/08-ai-coding-agent-prompts.md`).
+Status: `backend/` has the domain (phase 1 contracts done), policy, auth (dev user only) and a first projects API on NestJS, Prisma and PostgreSQL (phase 2, first slice); `frontend/` has the projects, execution and setup screens on Next.js and Tailwind (D24), calling the API through its own `/api` proxy. Layout, decisions and phases: `README.md` and `docs/decisions.md`. The implementation plan is in `docs/README.md` (phases 0 to 7, prompt templates in `docs/08-ai-coding-agent-prompts.md`).
 
 ## Layout
 

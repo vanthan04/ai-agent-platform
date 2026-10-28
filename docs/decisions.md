@@ -134,6 +134,20 @@ Decided 2026-10-27.
 - `baseBranch` of a task must now be a concrete branch name (`BranchName`); a pattern such as `release/*` is refused. The `RunView` of a single run carries `baseCommit`.
 - Not built yet: private repositories (a credential per project, kept in the vault), ssh and CodeCommit, system retries, a heartbeat longer than the 5-minute rule, and the stages after preparing.
 
+## D24 The frontend (first slice; implements the screens of D7 to D9)
+Decided 2026-10-28.
+- **Stack.** Next.js 16 (App Router) with React 19, TypeScript and Tailwind 4. Own small components (button, field, dialog, badge, states) instead of a component kit: the screens need a dozen of them, and each extra dependency is one more thing to review (D4). `lucide-react` for icons and `clsx` are the only other runtime packages. Tests are vitest with Testing Library.
+- **The browser never talks to the backend.** It calls `/api/...` on the app and a route handler forwards the call (`src/lib/proxy.ts`). This keeps the backend address out of the browser, avoids cross-origin rules, and gives one place that decides what passes: only `projects` and `health`, the five usual methods, four request headers (`content-type`, `accept`, `idempotency-key`, `x-correlation-id`), a 1 MB body, 30 s, no redirects. Cookies and authorization headers are never forwarded. The backend stays the authority on who may do what (D12); the page only decides what to enable.
+- **Authentication** is still the dev user (D18); the proxy adds nothing. When real sign-in lands, the proxy is where the session becomes a credential for the backend.
+- **Screens.** Projects (list, create); inside a project: Execution (tasks and runs with counts by status, search and filters, a live log per run, start and cancel) and Setup (repositories and allowed branches, policy, MCP servers, members). The Execution screen follows the reference design given by the user (light theme, orange accent, status cards, expandable task rows).
+- **Honest status.** A task has no stored status: it is derived from its newest run (`taskStatus`). Today a prepared run ends `failed` (D23), so the cards show Ready, In progress, Blocked and Failed, and there is no "Completed" card until a stage after preparing exists.
+- **Live data is polled**, as the backend offers (D23): runs every 2 s while any is in progress, a run's events every 1.5 s while it is. The log shows Connected, Reconnecting or Finished from the result of the last call.
+- **Policy screen.** The baseline is shown as text with no control. The editable part is saved with the version the editor loaded; a refusal because someone saved first (409) tells the user to load the newer version instead of overwriting it. A DEV sees everything read-only.
+- **MCP tokens** are typed into a password field, sent once and cleared; the backend never returns one, so the page has none to show.
+- Types in `src/lib/api/types.ts` are copied by hand from the backend views (the backend is the authority). Generating them from the backend is possible later if they drift.
+- Checked: lint, typecheck, 41 tests, production build, and the screens in a browser against a stand-in server because Docker was not running. Not yet checked against the real backend.
+- Not built yet: sign-in, a screen for approvals (needs a stage that asks for one), run artifacts, Jira as a task source, editing a task, deleting a project, the MCP tool picker for the policy (tools are typed as `connection:tool`).
+
 ## Boundary
 `harness-engineering` guides the AI coding agents that build this product. It is not a runtime and is not shipped. Product runtime (UI, API, queue, workers, provider adapters, integrations, approvals) lives only here. Do not copy harness rules into this repo; reference them.
 
@@ -169,7 +183,7 @@ Recorded from the Phase 0 audit. Facts are checked against the domain and policy
 - **Policy package.** It restates harness git and secret rules in code (`GIT_BLOCKED`, `isSecretPath`). The boundary says to reference harness rules, not copy them, so the two can drift. Before Phase 5, review three points: whether an allowed executable such as `node` or `pnpm` is allowed whatever its arguments, whether `git fetch` should count as touching the remote, and whether git's `-c` option can inject configuration. These are unverified suspicions, not confirmed defects.
 
 ## Open decisions
-Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D24 onward) in a reviewed change.
+Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D25 onward) in a reviewed change.
 
 - **O4 AI runtime language.** TypeScript as a backend module (the current layout, two source folders) or a separate Python service, which would add a third folder (`ai/`). Proposal: stay with the module; decide at Phase 6 with a minimal agent loop, nothing before it needs Python.
 - **O7 Tenant and workspace.** Proposal: keep `tenantId` (D2) and treat a workspace as a later grouping under it only if a use case appears.
