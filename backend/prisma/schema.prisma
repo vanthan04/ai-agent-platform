@@ -30,6 +30,7 @@ model Project {
   repositories   RepositoryMapping[]
   policies       ProjectPolicyVersion[]
   mcpConnections McpConnection[]
+  modelSettings  ProjectModelSettings?
   tasks          Task[]
   runs           Run[]
 
@@ -153,6 +154,19 @@ model McpConnection {
 
   @@unique([projectId, name])
   @@index([projectId])
+}
+
+// Which model a project's agents use (D25), at most one row per project. `provider` is a string checked by the code, so adding a
+// provider needs no migration. `secretRef` points at the encrypted API key in `Secret`; the key is never stored here.
+model ProjectModelSettings {
+  projectId String   @id
+  provider  String
+  model     String
+  baseUrl   String?
+  secretRef String?
+  updatedBy String
+  updatedAt DateTime
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 // An encrypted secret (AES-256-GCM). Only ciphertext is stored; the key lives in the environment, never in the database.
