@@ -22,7 +22,7 @@ pnpm workspace (`frontend`, `backend`), strict TypeScript, Vitest, ESLint with t
 - The policy evaluator returns `allow`, `ask` or `deny`. `ask` means a persisted approval is required first. Unlike the harness, a secret file read is `deny`, not `ask`, because there is no human present mid-run.
 
 ## D6 Two source folders and the remote
-The code is split into two source folders: `frontend/` (Next.js UI) and `backend/` (API, worker and AI agent runtime in one codebase). The AI runtime is a backend module, not a third folder, unless O4 later chooses a separate service. Inside `backend/src/`, `domain` depends on nothing, `policy` depends only on `domain`, and later modules (`api`, `worker`, `agent`, `integrations`) may depend on both. A module folder is created only when its phase starts. `frontend/` exists so far only as a README; no frontend framework is installed yet. The backend stack is D17; the queue is the run table (D23).
+The code is split into two source folders: `frontend/` (Next.js UI) and `backend/` (API, worker and AI agent runtime in one codebase). The AI runtime is a backend module, not a third folder,. Inside `backend/src/`, `domain` depends on nothing, `policy` depends only on `domain`, and later modules (`api`, `worker`, `agent`, `integrations`) may depend on both. A module folder is created only when its phase starts. `frontend/` exists so far only as a README; no frontend framework is installed yet. The backend stack is D17; the queue is the run table (D23).
 
 The git remote `origin` is `https://github.com/vanthan04/ai-agent-platform.git`. `harness-engineering/` is git-ignored (D16). The earlier inner repository of `platform/agent-platform` had no commits and was merged into the outer one.
 
@@ -148,6 +148,17 @@ Decided 2026-10-28.
 - Checked: lint, typecheck, 41 tests, production build, and the screens in a browser against a stand-in server because Docker was not running. Not yet checked against the real backend.
 - Not built yet: sign-in, a screen for approvals (needs a stage that asks for one), run artifacts, Jira as a task source, editing a task, deleting a project, the MCP tool picker for the policy (tools are typed as `connection:tool`).
 
+## D25 The AI runtime and the choice of model (settles O4)
+Decided 2026-10-28.
+- **The AI runtime is a TypeScript context of the backend** (`backend/src/agent`), not a separate service. The repository keeps two source folders. Python is not needed until a library requires it; that would be a new decision.
+- **The model is chosen in the UI, per project.** A project picks a provider and a model (Claude, Gemini, or another), and can change it. The run records which provider and model it used.
+- **A provider is an adapter behind one port** in the agent context: it takes messages and tool descriptions and returns text or tool calls, with token counts. Nothing else in the code names a vendor. The first adapters are Anthropic and Google Gemini, plus one for any server that speaks the OpenAI chat format, which covers "another" without a new adapter each time.
+- **No vendor SDK to start with.** Adapters call the providers' https APIs through the safe client of D21, so each adds no dependency and no new network path; an SDK is added only with a recorded reason (AGENTS.md).
+- **The API key is a secret of the project**, stored encrypted in the vault (D11) like an MCP token: typed once, never returned, never in a prompt, log or event. A run with no key for the chosen provider is `blocked` with a reason a person can act on (D14).
+- **Model output is untrusted**, like any text (see the product rules): it can ask for a tool, never widen what the policy allows.
+- First stage to build: **analysis**, read-only. The agent reads the prepared repository at the stored base commit and writes a report. It changes nothing and publishes nothing; the sandbox (phase 5) and approval and publish (phase 7) come after.
+- Still to decide inside the slice: how the agent reads the repository without a sandbox (proposal: the same https access as D23, files only, size limits), and the exact model list per provider.
+
 ## Boundary
 `harness-engineering` guides the AI coding agents that build this product. It is not a runtime and is not shipped. Product runtime (UI, API, queue, workers, provider adapters, integrations, approvals) lives only here. Do not copy harness rules into this repo; reference them.
 
@@ -177,15 +188,14 @@ Recorded from the Phase 0 audit. Facts are checked against the domain and policy
 
 - **Run states.** Code: `queued, preparing, analyzing, planning, implementing, verifying, awaiting_approval, publishing, succeeded, rejected, failed, cancelled`. Plan: adds `RESOLVING_INPUT`, `RESOLVING_REPOSITORY`, `REVIEWING_OUTPUT` and `BLOCKED`, and has no `rejected`. An ambiguous repository target ends in `blocked` (D14); input and repository resolution stay inside `preparing`.
 - **Approval.** Code asks once, after verification and before publishing, bound to run, diff hash and target branch (D3, D5). The plan has `WAITING_APPROVAL` after planning and also binds approval to the diff hash in its output phase. D15 keeps the single publish approval.
-- **Stack.** D4 fixes a TypeScript monorepo with zod. The plan proposes NestJS, Prisma, PostgreSQL and a Python AI runtime. The first three are now chosen (D17); the AI runtime language is still open (O4).
+- **Stack.** D4 fixes a TypeScript monorepo with zod. The plan proposes NestJS, Prisma, PostgreSQL and a Python AI runtime. The first three are now chosen (D17); the AI runtime is TypeScript in the backend (D25).
 - **Tenancy.** D2 uses one organization with a `tenantId` column. The plan names `Workspace` and `WorkspaceMember` (O7).
 - **Domain gaps.** Added in phase 1 (2026-10-27): provider descriptor with a declarative config schema, input snapshot with content hash, repository resolution with base commit SHA, idempotency key, correlation id, `projectId` on `Task` and `Run`, and the `blocked` status. Added in phase 2: the `Project` aggregate with members (D19) and repository mappings with allowed branches (a repository's address must be https or ssh and never carry credentials; a pattern that matches every branch is refused; the default branch must be an allowed one). Still missing: the validation of a configuration against a descriptor, and wiring `isBranchAllowed` into repository resolution (phase 4). `RepoProvider` is the fixed enum `github | codecommit` and `OutputKind` is `report | diff | test_report | pull_request`; the plan also lists a JSON artifact and a Jira comment. D7 to D9 add more: a `Project` entity, a stored policy with versions, an MCP connection, and a policy action for an MCP tool call (`Action` has no such kind today; an MCP write would currently fit only `external_write`).
 - **Policy package.** It restates harness git and secret rules in code (`GIT_BLOCKED`, `isSecretPath`). The boundary says to reference harness rules, not copy them, so the two can drift. Before Phase 5, review three points: whether an allowed executable such as `node` or `pnpm` is allowed whatever its arguments, whether `git fetch` should count as touching the remote, and whether git's `-c` option can inject configuration. These are unverified suspicions, not confirmed defects.
 
 ## Open decisions
-Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D25 onward) in a reviewed change.
+Proposed, not decided. Each needs a person to choose, then this section is replaced by numbered decisions (D26 onward) in a reviewed change.
 
-- **O4 AI runtime language.** TypeScript as a backend module (the current layout, two source folders) or a separate Python service, which would add a third folder (`ai/`). Proposal: stay with the module; decide at Phase 6 with a minimal agent loop, nothing before it needs Python.
 - **O7 Tenant and workspace.** Proposal: keep `tenantId` (D2) and treat a workspace as a later grouping under it only if a use case appears.
 - **O8 Where the plan documents live.** Resolved by the layout: in `docs/` of this repository, next to this file.## Actions for a human
 Items 1 and 2 touch harness files that only a human may edit.

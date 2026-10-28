@@ -26,7 +26,7 @@ backend/         API, worker and AI agent runtime in one codebase
 docs/            implementation plan and decisions
 ```
 
-`backend/src/` is organised by bounded context (D19) and grows by context as phases land (`agent`, …). Dependencies point inwards and only along the allowed list; `pnpm lint` enforces them. The AI runtime is a context of the backend, not a separate service, unless decision O4 chooses otherwise.
+`backend/src/` is organised by bounded context (D19) and grows by context as phases land (`agent`, …). Dependencies point inwards and only along the allowed list; `pnpm lint` enforces them. The AI runtime is a context of the backend, not a separate service (D25).
 
 ## Commands
 
