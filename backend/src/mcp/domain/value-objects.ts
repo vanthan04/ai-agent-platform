@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isPublicHttpsUrl } from "../../shared-kernel";
 import { id } from "./ids";
 
 export const McpConnectionId = id<"McpConnectionId">();
@@ -12,34 +13,12 @@ export const McpConnectionName = z
   .brand<"McpConnectionName">();
 export type McpConnectionName = z.infer<typeof McpConnectionName>;
 
-const PRIVATE_SUFFIXES = [".local", ".localhost", ".internal", ".lan", ".home", ".corp", ".intranet", ".private"];
-
-/**
- * A remote MCP server (D11): https, a public DNS name, no credentials and no query in the address. IP addresses and
- * single-label names such as `localhost` are refused, which also rules out the private and link-local ranges.
- * This is a first line only: a name can still resolve to a private address, so the call itself must check where it connects.
- */
-function isAcceptableMcpUrl(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:") return false;
-  if (url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") return false;
-  const host = url.hostname.toLowerCase();
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return false;
-  if (!/^[a-z][a-z0-9-]*$/.test(host.split(".").at(-1) ?? "")) return false;
-  return !PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix));
-}
-
 export const McpServerUrl = z
   .string()
   .trim()
   .min(1)
   .max(500)
-  .refine(isAcceptableMcpUrl, "must be an https address of a public server, with no IP address, credentials or query")
+  .refine(isPublicHttpsUrl, "must be an https address of a public server, with no IP address, credentials or query")
   .brand<"McpServerUrl">();
 export type McpServerUrl = z.infer<typeof McpServerUrl>;
 
