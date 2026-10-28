@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 // Architecture rules (D19 in docs/decisions.md). Each bounded context lives in src/<context>/ and, where it has behaviour beyond
 // pure rules, is split into domain / application / infrastructure / interface. Dependencies point inwards and between contexts
 // only along the allowed list below; a context is used through its index file, never through its inner folders.
-const CONTEXTS = ["shared-kernel", "policy", "execution", "integrations", "identity", "projects", "vault", "mcp", "worker"];
+const CONTEXTS = ["shared-kernel", "policy", "execution", "integrations", "identity", "projects", "vault", "mcp", "worker", "agent"];
 
 /** For each context, the other contexts it may depend on. */
 const ALLOWED = {
@@ -16,6 +16,7 @@ const ALLOWED = {
   vault: ["shared-kernel"],
   mcp: ["shared-kernel", "identity", "projects", "vault"],
   worker: ["shared-kernel", "execution", "integrations"],
+  agent: ["shared-kernel", "identity", "projects", "vault"],
 };
 
 const LAYERS = ["domain", "application", "infrastructure", "interface"];
